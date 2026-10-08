@@ -49,6 +49,18 @@ public class WormTestSystem extends TickingSystem<EntityStore> {
     }
 
     /** The player has left: nothing to undo on a client that is gone, but the job must not run on. */
+    /** Sets the lift of the owner's worm, if any. Returns how many were changed. */
+    int setWormLift(UUID owner, double blocks) {
+        int n = 0;
+        for (Job job : jobs) {
+            if (job instanceof WormJob worm && job.owner().equals(owner)) {
+                worm.setLift(blocks);
+                n++;
+            }
+        }
+        return n;
+    }
+
     void dropFor(UUID owner) {
         for (Job job : jobs) {
             if (job.owner().equals(owner)) {

@@ -34,8 +34,8 @@ final class WormJob implements WormTestSystem.Job {
     static final String MODEL_ID = "Arrakis_Worm_Placeholder";
     static final float CYCLE = 17.0f;
     static final float MAX_SECONDS = 600.0f;
-    /** Body length divided by the height that shows above the sand: the rest stays buried. */
-    static final double BODY_RATIO = 2.0;
+    /** The model is centred on its origin and twice the visible height long, so the origin sits this many visible heights below the top of the sand when buried. */
+    static final double BODY_RATIO = 1.0;
     /** Height that shows above the sand at scale 1, in blocks. */
     static final double HEIGHT = 10.0;
 
@@ -48,6 +48,8 @@ final class WormJob implements WormTestSystem.Job {
     private final double headingX;
     private final double headingZ;
     private final float baseYaw;
+    /** Extra height in blocks added to the whole script; set live with /wormtest worm lift. */
+    private volatile double lift;
     private float elapsed;
 
     private WormJob(World world, PlayerRef player, Vector3d origin, double groundY, double height,
@@ -107,6 +109,10 @@ final class WormJob implements WormTestSystem.Job {
         return job;
     }
 
+    void setLift(double blocks) {
+        lift = blocks;
+    }
+
     private static double smooth(double t) {
         t = Math.min(1, Math.max(0, t));
         return t * t * (3 - 2 * t);
@@ -163,7 +169,7 @@ final class WormJob implements WormTestSystem.Job {
         if (transform == null) {
             return false;
         }
-        transform.setPosition(new Vector3d(origin.x + headingX * travel, groundY - height * BODY_RATIO + height * (1 - depth), origin.z + headingZ * travel));
+        transform.setPosition(new Vector3d(origin.x + headingX * travel, groundY + lift - height * BODY_RATIO + height * (1 - depth), origin.z + headingZ * travel));
         Rotation3f rotation = transform.getRotation();
         rotation.setPitch(pitch);
         rotation.setYaw(yaw);

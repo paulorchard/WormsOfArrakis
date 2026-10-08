@@ -203,6 +203,12 @@ public class WormTestCommand extends AbstractCommandCollection {
     /** /wormtest worm [scale|remove] [persist] */
     private void worm(CommandContext context, Store<EntityStore> store, Ref<EntityStore> ref, PlayerRef player,
                       World world, String[] args) {
+        if (Args.text(args, 0, "").equals("lift")) {
+            double blocks = Args.number(args, 1, 0);
+            int n = system.setWormLift(player.getUuid(), blocks);
+            say(context, n > 0 ? "worm: lifted by " + blocks + " blocks (added to every height)" : "no worm to lift");
+            return;
+        }
         if (Args.text(args, 0, "").equals("remove")) {
             int n = system.stop(player.getUuid(), "worm");
             say(context, n > 0 ? "worm removed" : "no worm to remove");

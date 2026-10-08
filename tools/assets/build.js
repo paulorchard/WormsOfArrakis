@@ -50,19 +50,18 @@ console.log('weathers and texture written');
 const npcDir = path.join(root, 'Common/NPC/Worms_of_Arrakis');
 fs.mkdirSync(npcDir, { recursive: true });
 const face = { offset: { x: 0, y: 0 }, mirror: { x: false, y: false }, angle: 0 };
-const model = {
-  nodes: [{
-    id: '1', name: 'Origin', children: [],
-    position: { x: 0, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 },
-    shape: {
-      type: 'box', offset: { x: 0, y: 320, z: 0 }, stretch: { x: 1, y: 1, z: 1 },
-      settings: { size: { x: 192, y: 640, z: 192 } },
-      visible: true, doubleSided: false, shadingMode: 'flat', unwrapMode: 'custom',
-      textureLayout: { front: face, back: face, left: face, right: face, top: face, bottom: face },
-    },
-  }],
-  lod: 'auto',
-};
+// A box seems to be limited to 320 model units (10 blocks) tall, so the 20-block body is two boxes stacked, centred on the model origin so the position is the middle of the body whatever the engine does with the pivot.
+const box = (id, name, y) => ({
+  id, name, children: [],
+  position: { x: 0, y: 0, z: 0 }, orientation: { x: 0, y: 0, z: 0, w: 1 },
+  shape: {
+    type: 'box', offset: { x: 0, y, z: 0 }, stretch: { x: 1, y: 1, z: 1 },
+    settings: { size: { x: 192, y: 320, z: 192 } },
+    visible: true, doubleSided: false, shadingMode: 'flat', unwrapMode: 'custom',
+    textureLayout: { front: face, back: face, left: face, right: face, top: face, bottom: face },
+  },
+});
+const model = { nodes: [box('1', 'Lower', -160), box('2', 'Upper', 160)], lod: 'auto' };
 fs.writeFileSync(path.join(npcDir, 'Arrakis_Worm_Placeholder.blockymodel'), JSON.stringify(model, null, 2) + '\n');
 // Sandstone texture for the worm: the vanilla Rock_Sandstone_Side tile repeated over a 256x704 sheet.
 const sandstone = process.argv[3];
