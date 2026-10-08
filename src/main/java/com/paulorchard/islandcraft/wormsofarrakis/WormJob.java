@@ -34,7 +34,9 @@ final class WormJob implements WormTestSystem.Job {
     static final String MODEL_ID = "Arrakis_Worm_Placeholder";
     static final float CYCLE = 17.0f;
     static final float MAX_SECONDS = 600.0f;
-    /** Height of the model at scale 1, in blocks. */
+    /** Body length divided by the height that shows above the sand: the rest stays buried. */
+    static final double BODY_RATIO = 2.0;
+    /** Height that shows above the sand at scale 1, in blocks. */
     static final double HEIGHT = 10.0;
 
     private final World world;
@@ -83,7 +85,7 @@ final class WormJob implements WormTestSystem.Job {
         float yaw = (float) Math.atan2(-hx, -hz);
         WormJob job = new WormJob(world, player, new Vector3d(feet.x, feet.y, feet.z), feet.y, height, hx, hz, yaw);
 
-        Vector3d buried = new Vector3d(feet.x, feet.y - height, feet.z);
+        Vector3d buried = new Vector3d(feet.x, feet.y - height * BODY_RATIO, feet.z); // top level with the ground
         Rotation3f rotation = new Rotation3f(0, yaw, 0);
         Holder<EntityStore> holder = store.getRegistry().newHolder();
         holder.addComponent(NetworkId.getComponentType(), new NetworkId(store.getExternalData().takeNextNetworkId()));
@@ -141,14 +143,14 @@ final class WormJob implements WormTestSystem.Job {
             depth = 1;
         } else if (t < 3.5) { // rises in 1.5 s
             depth = 1 - smooth((t - 2) / 1.5);
-            pitch = (float) (Math.sin((t - 2) * 4.0) * 0.12);
+            pitch = (float) (Math.sin((t - 2) * 4.0) * 0.06);
         } else if (t < 5.5) {
             depth = 0;
-            roll = (float) (Math.sin((t - 3.5) * 3.0) * 0.25);
-            pitch = (float) (Math.sin((t - 3.5) * 2.0) * 0.15);
+            roll = (float) (Math.sin((t - 3.5) * 3.0) * 0.12);
+            pitch = (float) (Math.sin((t - 3.5) * 2.0) * 0.07);
         } else if (t < 7) {
             depth = smooth((t - 5.5) / 1.5);
-            roll = (float) (Math.sin((t - 5.5) * 3.0) * 0.25 * (1 - smooth((t - 5.5) / 1.5)));
+            roll = (float) (Math.sin((t - 5.5) * 3.0) * 0.12 * (1 - smooth((t - 5.5) / 1.5)));
         } else if (t < 13) {
             depth = 1 + 0.05 * Math.sin((t - 7) * 2.5); // buried, bobbing a little as it moves
             travel = reach * smooth((t - 7) / 6);
@@ -161,7 +163,7 @@ final class WormJob implements WormTestSystem.Job {
         if (transform == null) {
             return false;
         }
-        transform.setPosition(new Vector3d(origin.x + headingX * travel, groundY - height * depth, origin.z + headingZ * travel));
+        transform.setPosition(new Vector3d(origin.x + headingX * travel, groundY - height * BODY_RATIO + height * (1 - depth), origin.z + headingZ * travel));
         Rotation3f rotation = transform.getRotation();
         rotation.setPitch(pitch);
         rotation.setYaw(yaw);

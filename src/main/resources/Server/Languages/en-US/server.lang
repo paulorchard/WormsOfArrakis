@@ -1,5 +1,5 @@
 commands.wormtest.desc = Throwaway engine tests for the sandworm mod (operators only)
-commands.wormtest.ripple.desc = A sand ripple shown only to clients: ripple [radius] [raise|trough|both] [self|nearby]
+commands.wormtest.ripple.desc = A sand ripple shown only to clients: ripple [radius] [self|nearby]
 commands.wormtest.vignette.desc = A screen overlay: vignette on|off [weather-soft|weather-sand|effect-soft|effect-sand]
 commands.wormtest.slow.desc = Ramp your speed down then restore: slow <percent|off> [seconds] [base|mult|jump|air|accel|all|effect] [updatesPerSecond]
 commands.wormtest.worm.desc = A moving 6x10 block stand-in worm: worm [scale|remove] [persist]
@@ -7,4 +7,7 @@ commands.wormtest.burst.desc = A dust plume 10 blocks ahead: burst [scale] [vari
 commands.wormtest.rumble.desc = Low rumble sounds: rumble [seconds] [statue|ice|storm|layered|ambience|stop] [pitch]
 commands.wormtest.speed.desc = Measure your real walk, run and sprint speed: speed [seconds]
 commands.wormtest.selftest.desc = Check assets and run the ripple and worm code (around you if run by a player, else around the origin)
-items.Arrakis_Worm_Ripple_Layer.name = Ripple layer (test)
+items.Arrakis_Worm_Ripple_Layer_1.name = Ripple layer 1 px (test)
+items.Arrakis_Worm_Ripple_Layer_2.name = Ripple layer 2 px (test)
+items.Arrakis_Worm_Ripple_Layer_3.name = Ripple layer 3 px (test)
+items.Arrakis_Worm_Ripple_Layer_4.name = Ripple layer 4 px (test)

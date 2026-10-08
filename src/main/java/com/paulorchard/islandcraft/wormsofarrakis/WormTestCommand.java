@@ -40,7 +40,7 @@ public class WormTestCommand extends AbstractCommandCollection {
         super("wormtest", LANG + "desc");
         this.system = system;
         this.sand = sand;
-        addSubCommand(Positional.build("ripple", LANG + "ripple.desc", this::ripple, "radius", "mode", "scope"));
+        addSubCommand(Positional.build("ripple", LANG + "ripple.desc", this::ripple, "radius", "scope"));
         addSubCommand(Positional.build("vignette", LANG + "vignette.desc", this::vignette, "state", "variant"));
         addSubCommand(Positional.build("slow", LANG + "slow.desc", this::slow, "percent", "seconds", "fields", "hz"));
         addSubCommand(Positional.build("worm", LANG + "worm.desc", this::worm, "scale", "persist"));
@@ -50,10 +50,14 @@ public class WormTestCommand extends AbstractCommandCollection {
         addSubCommand(Positional.build("speed", LANG + "speed.desc", this::speed, "seconds"));
     }
 
-    /** The thin sand layer block shown instead of a full block, or -1 if it is not loaded. */
-    static int layerBlockId() {
-        int id = com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType.getAssetMap().getIndex("Arrakis_Worm_Ripple_Layer");
-        return id == Integer.MIN_VALUE ? -1 : id;
+    /** The thin sand layer blocks of 1 to 4 px, -1 for any that is not loaded. */
+    static int[] layerBlockIds() {
+        int[] ids = new int[4];
+        for (int h = 1; h <= 4; h++) {
+            int id = com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType.getAssetMap().getIndex("Arrakis_Worm_Ripple_Layer_" + h);
+            ids[h - 1] = id == Integer.MIN_VALUE ? -1 : id;
+        }
+        return ids;
     }
 
     private static void say(CommandContext context, String text) {
@@ -70,9 +74,8 @@ public class WormTestCommand extends AbstractCommandCollection {
     /** /wormtest ripple [radius] [raise|trough|both] [self|nearby] */
     private void ripple(CommandContext context, Store<EntityStore> store, Ref<EntityStore> ref, PlayerRef player,
                         World world, String[] args) {
-        int radius = (int) Math.min(64, Math.max(1, Args.number(args, 0, 5)));
-        String mode = Args.text(args, 1, "raise");
-        String scope = Args.text(args, 2, "self");
+        int radius = (int) Math.min(64, Math.max(1, Args.number(args, 0, 15)));
+        String scope = Args.text(args, 1, "self");
         Vector3d p = position(store, ref);
         if (p == null) {
             return;
@@ -96,14 +99,14 @@ public class WormTestCommand extends AbstractCommandCollection {
         }
         Set<Integer> sandIds = sand.get();
         RippleJob job = RippleJob.create(world, player.getUuid(), viewers, new double[] {p.x, p.y, p.z}, radius,
-                mode, sandIds, layerBlockId(), avoid);
+                sandIds, layerBlockIds(), avoid);
         if (job.cellCount() == 0) {
             say(context, "ripple: no sand columns found within " + radius + " blocks (sand ids " + sandIds + ")");
             return;
         }
         system.add(job);
-        say(context, String.format(Locale.ROOT, "ripple: %d columns, mode %s, %d viewer(s), radius %d",
-                job.cellCount(), mode, viewers.size(), radius));
+        say(context, String.format(Locale.ROOT, "ripple: %d columns, %d viewer(s), radius %d",
+                job.cellCount(), viewers.size(), radius));
     }
 
     // ------------------------------------------------------------------ 2. vignette
@@ -151,13 +154,21 @@ public class WormTestCommand extends AbstractCommandCollection {
     /** /wormtest slow <percent|off> [seconds] [base|mult|jump|air|accel|all|effect, joined with +] [updatesPerSecond] */
     private void slow(CommandContext context, Store<EntityStore> store, Ref<EntityStore> ref, PlayerRef player,
                       World world, String[] args) {
-        String first = Args.text(args, 0, "off");
+        String first = Args.text(args, 0, "");
+        if (first.isEmpty()) {
+            say(context, "slow: give the percent of normal speed to slow to, e.g. /wormtest slow 40 3  (40% over 3 s). /wormtest slow off restores. 100 or more changes nothing");
+            return;
+        }
         if (first.equals("off")) {
             int n = system.stop(player.getUuid(), "slow");
             say(context, n > 0 ? "slow off, settings restored" : "slow was not on");
             return;
         }
         double percent = Args.number(args, 0, 50);
+        if (percent >= 100 || percent <= 0) {
+            say(context, "slow: " + percent + "% of normal speed is no slowdown (or none at all); use 1 to 99, e.g. /wormtest slow 40 3");
+            return;
+        }
         float seconds = (float) Args.number(args, 1, 3);
         String fieldText = Args.text(args, 2, "base+mult");
         float hz = (float) Args.number(args, 3, 30);
@@ -218,7 +229,7 @@ public class WormTestCommand extends AbstractCommandCollection {
         }
         system.add(job);
         say(context, String.format(Locale.ROOT,
-                "worm: spawned at scale %.1f (about %.0f wide, %.0f tall), %s. It rises, sways, sinks, travels buried and returns every %.0f s. '/wormtest worm remove' removes it",
+                "worm: spawned at scale %.1f (about %.0f wide, %.0f tall above the sand, twice that long), %s. It rises, sways, sinks, travels buried and returns every %.0f s. '/wormtest worm remove' removes it",
                 scale, 6 * scale, 10 * scale, persist ? "persistent (saved with its chunk)" : "not saved", (double) WormJob.CYCLE));
     }
 
@@ -249,16 +260,31 @@ public class WormTestCommand extends AbstractCommandCollection {
         final double fx = x;
         final double fz = z;
         TimedEffectsJob job = new TimedEffectsJob(world, player.getUuid(), "burst");
-        // The plume climbs for the first half and sinks for the second: each wave is placed higher, then lower,
-        // along a sine arc, and gets a little smaller as the dust thins.
-        int waves = variant >= 4 ? 12 : 1;
+        // An explosion out of the sand: the plume shoots up to its peak in 0.2 s (five waves 0.05 s apart, each a
+        // ring of four so it is wide), then sinks and thins out over about 2.5 s.
         double peak = scale * 1.5;
-        for (int i = 0; i < waves; i++) {
-            final int wave = i;
-            double u = waves == 1 ? 0 : i / (waves - 1.0);
-            final double lift = peak * Math.sin(Math.PI * u);
-            final float s = scale * (float) (1.0 - 0.5 * u);
-            job.at(i * 0.2f, () -> plume(world, store, variant, fx, fy + lift, fz, s, wave));
+        if (variant < 4) {
+            job.at(0f, () -> plume(world, store, variant, fx, fy, fz, scale, 0));
+        } else {
+            for (int i = 0; i < 5; i++) {
+                final double lift = peak * Math.sin((i + 1) / 5.0 * Math.PI / 2);
+                final float s = scale * (0.8f + 0.04f * i);
+                final int wave = i;
+                job.at(i * 0.05f, () -> {
+                    double r = scale * 0.25;
+                    plume(world, store, variant, fx, fy + lift, fz, s, wave);
+                    plume(world, store, 1, fx + r, fy + lift * 0.8, fz, s * 0.7f, 1);
+                    plume(world, store, 1, fx - r, fy + lift * 0.8, fz, s * 0.7f, 1);
+                    plume(world, store, 1, fx, fy + lift * 0.8, fz + r, s * 0.7f, 1);
+                    plume(world, store, 1, fx, fy + lift * 0.8, fz - r, s * 0.7f, 1);
+                });
+            }
+            for (int j = 0; j < 8; j++) {
+                final double u = (j + 1) / 8.0;
+                final double lift = peak * (1 - u * u);
+                final float s = scale * (float) (1.0 - 0.6 * u);
+                job.at(0.25f + j * 0.3f, () -> plume(world, store, variant, fx, fy + lift, fz, s, 1));
+            }
         }
         system.add(job);
         say(context, String.format(Locale.ROOT, "burst: variant %d, scale %.1f at %.0f %.0f %.0f", variant, scale, x, y, z));

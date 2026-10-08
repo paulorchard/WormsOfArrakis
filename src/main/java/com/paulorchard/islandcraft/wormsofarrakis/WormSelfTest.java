@@ -58,7 +58,14 @@ final class WormSelfTest extends AbstractWorldCommand {
             }
         }
         CompletableFuture.allOf(loads.toArray(new CompletableFuture[0]))
-                .thenAccept(v -> world.execute(() -> run(context, world, world.getEntityStore().getStore(), originX, originZ)));
+                .thenAccept(v -> world.execute(() -> {
+                    try {
+                        run(context, world, world.getEntityStore().getStore(), originX, originZ);
+                    } catch (Throwable t) {
+                        say(context, "selftest FAILED: " + t);
+                        WormsOfArrakisPlugin.get().getLogger().at(java.util.logging.Level.WARNING).withCause(t).log("selftest failed");
+                    }
+                }));
     }
 
     private void run(CommandContext context, World world, Store<EntityStore> store, int originX, int originZ) {
@@ -92,8 +99,8 @@ final class WormSelfTest extends AbstractWorldCommand {
         if (ModelAsset.getAssetMap().getAsset(WormJob.MODEL_ID) == null) {
             missing.add("model " + WormJob.MODEL_ID);
         }
-        if (WormTestCommand.layerBlockId() < 0) {
-            missing.add("block Arrakis_Worm_Ripple_Layer");
+        if (java.util.Arrays.stream(WormTestCommand.layerBlockIds()).anyMatch(id -> id < 0)) {
+            missing.add("blocks Arrakis_Worm_Ripple_Layer_1 to 4");
         }
         say(context, "assets missing: " + (missing.isEmpty() ? "none" : missing));
 
@@ -122,7 +129,7 @@ final class WormSelfTest extends AbstractWorldCommand {
         say(context, "using sand at " + spot);
 
         RippleJob ripple = RippleJob.create(world, java.util.UUID.randomUUID(), new ArrayList<>(),
-                new double[] {spot.x, spot.y, spot.z}, 5, "both", sand.get(), WormTestCommand.layerBlockId(), new ArrayList<>());
+                new double[] {spot.x, spot.y, spot.z}, 5, sand.get(), WormTestCommand.layerBlockIds(), new ArrayList<>());
         int ticks = 0;
         while (ripple.tick(1 / 30f, store) && ticks < 1000) {
             ticks++;
@@ -132,7 +139,7 @@ final class WormSelfTest extends AbstractWorldCommand {
         for (int radius : new int[] {5, 20, 40}) {
             long t0 = System.nanoTime();
             RippleJob big = RippleJob.create(world, java.util.UUID.randomUUID(), new ArrayList<>(),
-                    new double[] {spot.x, spot.y, spot.z}, radius, "raise", sand.get(), WormTestCommand.layerBlockId(), new ArrayList<>());
+                    new double[] {spot.x, spot.y, spot.z}, radius, sand.get(), WormTestCommand.layerBlockIds(), new ArrayList<>());
             long built = System.nanoTime() - t0;
             int n = 0;
             t0 = System.nanoTime();
@@ -164,9 +171,10 @@ final class WormSelfTest extends AbstractWorldCommand {
                 n++;
             }
             worm.abort(store);
-            say(context, "worm (" + (persist ? "persistent" : "not saved") + "): spawned, moved for " + n
-                    + " ticks, removed");
+            say(context, "worm " + (persist ? "that saves with its chunk" : "that is not saved") + ": spawned, moved for " + n
+                    + " ticks, removed. OK");
         }
+        say(context, "selftest finished: all checks passed");
     }
 
     private static void say(CommandContext context, String text) {

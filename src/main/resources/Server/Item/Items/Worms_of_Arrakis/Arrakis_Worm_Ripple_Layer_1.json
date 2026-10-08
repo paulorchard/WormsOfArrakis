@@ -1,0 +1,24 @@
+{
+  "TranslationProperties": {
+    "Name": "server.items.Arrakis_Worm_Ripple_Layer_1.name"
+  },
+  "PlayerAnimationsId": "Block",
+  "BlockType": {
+    "Material": "Empty",
+    "DrawType": "Model",
+    "CustomModel": "Blocks/Worms_of_Arrakis/Arrakis_Worm_Ripple_Layer_1.blockymodel",
+    "CustomModelTexture": [
+      {
+        "Texture": "BlockTextures/Soil_Sand_White.png",
+        "Weight": 1
+      }
+    ],
+    "Group": "Sand",
+    "Flags": {},
+    "BlockParticleSetId": "Sand",
+    "BlockSoundSetId": "Sand",
+    "PhysicalMaterialId": "Dirt",
+    "ParticleColor": "#fcdc7c",
+    "TextureComputedColor": "#E0C469"
+  }
+}

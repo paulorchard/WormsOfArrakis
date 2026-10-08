@@ -21,13 +21,13 @@ import java.util.UUID;
 
 /**
  * A wave of sand that exists only on clients. For the top sand block of each column around a point, a fake block
- * is sent to the viewers (one block higher, or air for a trough), ring by ring moving outward, then the real block
+ * is sent to the viewers (a layer 1 to 4 px high on top of the sand), ring by ring moving outward, then the real block
  * is read from the world again and sent back. The world is never touched.
  */
 final class RippleJob implements WormTestSystem.Job {
 
+    /** Time for the wave to travel from the centre to the edge, whatever the radius. */
     static final float DURATION = 1.5f;
-    static final float HOLD = 0.3f;
     /** If the job somehow outlives this, everything is restored and it ends. */
     static final float MAX_LIFE = 6.0f;
 
@@ -49,6 +49,8 @@ final class RippleJob implements WormTestSystem.Job {
     private final UUID owner;
     private final List<PlayerRef> viewers;
     private final List<Cell> cells = new ArrayList<>();
+    /** Seconds each ring stays up, which is also the gap between rings, so the wave is one block wide. */
+    private float step;
     private float elapsed;
     private int packets;
     private int blocksSent;
@@ -63,12 +65,13 @@ final class RippleJob implements WormTestSystem.Job {
 
     /**
      * @param centre where the wave starts (the caller's position)
-     * @param mode   raise, trough or both (raise on even rings, trough on odd)
      * @param avoid  positions of everyone who must not have a block appear inside them
      */
     static RippleJob create(World world, UUID owner, List<PlayerRef> viewers, double[] centre, int radius,
-                            String mode, Set<Integer> sand, int layerId, List<double[]> avoid) {
+                            Set<Integer> sand, int[] layerIds, List<double[]> avoid) {
         RippleJob job = new RippleJob(world, owner, viewers);
+        job.step = DURATION / (radius + 1.0f);
+        java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
         int cx = (int) Math.floor(centre[0]);
         int cz = (int) Math.floor(centre[2]);
         for (int dx = -radius; dx <= radius; dx++) {
@@ -89,29 +92,29 @@ final class RippleJob implements WormTestSystem.Job {
                     continue;
                 }
                 int ring = (int) Math.round(distance);
-                boolean trough = mode.equals("trough") || (mode.equals("both") && ring % 2 == 1);
-                int y = trough ? top : top + 1;
-                if (!trough && chunk.getBlock(x, y, z) != 0) {
+                int y = top + 1;
+                if (chunk.getBlock(x, y, z) != 0) {
                     continue;
                 }
-                if (blocked(avoid, x, y, z, trough)) {
+                if (blocked(avoid, x, y, z)) {
                     continue;
                 }
-                float start = ring / (radius + 1.0f) * (DURATION - HOLD);
-                job.cells.add(new Cell(x, y, z, layerId > 0 ? layerId : trough ? 0 : topId, start));
+                // Each column gets a random height of 1 to 4 px, so it reads as water on a rough surface.
+                int fake = layerIds[random.nextInt(layerIds.length)];
+                job.cells.add(new Cell(x, y, z, fake > 0 ? fake : topId, ring * job.step));
             }
         }
         return job;
     }
 
-    /** True if a fake block there would appear inside a player (raise) or drop away from under their feet (trough). */
-    private static boolean blocked(List<double[]> avoid, int x, int y, int z, boolean trough) {
+    /** True if a fake block there would appear inside a player (not an issue for the Empty-material layer blocks, kept in case a full block is used). */
+    private static boolean blocked(List<double[]> avoid, int x, int y, int z) {
         for (double[] p : avoid) {
             boolean overlapsColumn = Math.abs(p[0] - (x + 0.5)) < 1.0 && Math.abs(p[2] - (z + 0.5)) < 1.0;
             if (!overlapsColumn) {
                 continue;
             }
-            boolean inTheWay = trough ? p[1] < y + 1.5 && p[1] > y - 0.5 : p[1] < y + 1 && p[1] + 1.8 > y;
+            boolean inTheWay = p[1] < y + 1 && p[1] + 1.8 > y;
             if (inTheWay) {
                 return true;
             }
@@ -149,7 +152,7 @@ final class RippleJob implements WormTestSystem.Job {
         List<Cell> restore = new ArrayList<>();
         boolean allDone = true;
         for (Cell cell : cells) {
-            boolean shouldBeUp = elapsed >= cell.start && elapsed < cell.start + HOLD;
+            boolean shouldBeUp = elapsed >= cell.start && elapsed < cell.start + step;
             if (shouldBeUp && !cell.up) {
                 raise.add(cell);
                 cell.up = true;
@@ -157,7 +160,7 @@ final class RippleJob implements WormTestSystem.Job {
                 restore.add(cell);
                 cell.up = false;
             }
-            if (elapsed < cell.start + HOLD) {
+            if (elapsed < cell.start + step) {
                 allDone = false;
             }
         }
