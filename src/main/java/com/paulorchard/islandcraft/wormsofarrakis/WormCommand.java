@@ -45,6 +45,7 @@ public class WormCommand extends AbstractCommandCollection {
         addSubCommand(WorldPositional.build("trigger", LANG + "trigger.desc", this::trigger, "player", "stalkSeconds",
                 "lockSeconds"));
         addSubCommand(WorldPositional.build("preview", LANG + "preview.desc", this::preview, "effect", "seconds"));
+        addSubCommand(WorldPositional.build("breach", LANG + "breach.desc", this::breach, "target"));
         addSubCommand(WorldPositional.build("stop", LANG + "stop.desc", this::stop, "player"));
         addSubCommand(WorldPositional.build("ignore", LANG + "ignore.desc", this::ignore, "player"));
     }
@@ -229,6 +230,22 @@ public class WormCommand extends AbstractCommandCollection {
         WormEvent event = manager.trigger(a.world, group, id, timings, true);
         say(context, "trigger.done", "id", String.valueOf(event.getId()), "target", player.getUsername(),
                 "stalk", num(stalk), "lock", num(lock));
+    }
+
+    /** /worm breach [player|self|here]: straight to BREACH under a player, or the effect alone at the caller. */
+    private void breach(CommandContext context, World world, Store<EntityStore> store, String[] args) {
+        String who = args.length > 0 ? args[0] : "self";
+        if (who.equalsIgnoreCase("here")) {
+            PlayerRef self = caller(context, store);
+            if (self == null) {
+                say(context, "needPlayer");
+                return;
+            }
+            effects.startBreach(world, store, null, self, config.get().getBreachSeconds());
+            say(context, "breach.here");
+            return;
+        }
+        trigger(context, world, store, new String[] {who, "0.05", "0.05"});
     }
 
     private static double parse(String text, double fallback) {

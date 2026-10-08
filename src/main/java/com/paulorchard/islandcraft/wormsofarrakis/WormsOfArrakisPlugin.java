@@ -39,6 +39,14 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
         return instance;
     }
 
+    WormEffects effects() {
+        return effects;
+    }
+
+    WormsOfArrakisConfig config() {
+        return config.get();
+    }
+
     AggroManager aggro() {
         return aggro;
     }

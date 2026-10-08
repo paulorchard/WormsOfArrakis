@@ -111,6 +111,12 @@ final class WormSelfTest extends AbstractWorldCommand {
                 missing.add("camera shake " + id);
             }
         }
+        if (WormDevourDamage.cause() == null) {
+            missing.add("damage cause " + WormDevourDamage.CAUSE_ID);
+        }
+        if (SoundEvent.getAssetMap().getIndex("SFX_Sand_Break") == Integer.MIN_VALUE) {
+            missing.add("sound SFX_Sand_Break");
+        }
         if (ModelAsset.getAssetMap().getAsset(WormJob.MODEL_ID) == null) {
             missing.add("model " + WormJob.MODEL_ID);
         }
@@ -189,6 +195,16 @@ final class WormSelfTest extends AbstractWorldCommand {
             say(context, "worm " + (persist ? "that saves with its chunk" : "that is not saved") + ": spawned, moved for " + n
                     + " ticks, removed. OK");
         }
+        // The breach, with nobody there: runs the whole script, spawns and removes the worm.
+        WormsOfArrakisPlugin plugin = WormsOfArrakisPlugin.get();
+        BreachJob breach = new BreachJob(plugin.effects(), world, java.util.UUID.randomUUID(), null, null,
+                new Vector3d(spot.x, spot.y, spot.z), new Vector3d(0, 0, 1), plugin.config().getBreachSeconds(), plugin::config);
+        int breachTicks = 0;
+        while (breach.tick(1 / 30f, store) && breachTicks < 30 * 20) {
+            breachTicks++;
+        }
+        breach.abort(store);
+        say(context, "breach: ran " + breachTicks + " ticks (" + String.format(java.util.Locale.ROOT, "%.1f", breachTicks / 30.0) + " s), worm removed. OK");
         say(context, "selftest finished: all checks passed");
     }
 

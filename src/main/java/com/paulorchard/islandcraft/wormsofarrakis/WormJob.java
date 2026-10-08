@@ -89,9 +89,23 @@ final class WormJob implements WormTestSystem.Job {
 
         Vector3d buried = new Vector3d(feet.x, feet.y - height * BODY_RATIO, feet.z); // top level with the ground
         Rotation3f rotation = new Rotation3f(0, yaw, 0);
+        job.entity = spawnProp(store, buried, rotation, scale, persist);
+        return job;
+    }
+
+    /**
+     * Creates the worm prop entity: a model with a transform and no behaviour, no collision and no damage.
+     * Returns null if the model asset is not loaded.
+     */
+    static Ref<EntityStore> spawnProp(Store<EntityStore> store, Vector3d position, Rotation3f rotation, float scale,
+                                      boolean persist) {
+        ModelAsset asset = ModelAsset.getAssetMap().getAsset(MODEL_ID);
+        if (asset == null) {
+            return null;
+        }
         Holder<EntityStore> holder = store.getRegistry().newHolder();
         holder.addComponent(NetworkId.getComponentType(), new NetworkId(store.getExternalData().takeNextNetworkId()));
-        holder.addComponent(TransformComponent.getComponentType(), new TransformComponent(buried, rotation));
+        holder.addComponent(TransformComponent.getComponentType(), new TransformComponent(position, rotation));
         holder.addComponent(ModelComponent.getComponentType(), new ModelComponent(Model.createStaticScaledModel(asset, scale)));
         if (persist) {
             holder.addComponent(PersistentModel.getComponentType(),
@@ -105,8 +119,7 @@ final class WormJob implements WormTestSystem.Job {
         holder.addComponent(Intangible.getComponentType(), Intangible.INSTANCE);
         holder.addComponent(Invulnerable.getComponentType(), Invulnerable.INSTANCE);
         holder.ensureComponent(UUIDComponent.getComponentType());
-        job.entity = store.addEntity(holder, AddReason.SPAWN);
-        return job;
+        return store.addEntity(holder, AddReason.SPAWN);
     }
 
     void setLift(double blocks) {

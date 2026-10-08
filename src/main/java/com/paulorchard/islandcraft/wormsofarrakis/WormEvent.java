@@ -54,6 +54,8 @@ public final class WormEvent {
     private double elapsed;
     private double length;
     private WormEndReason endReason;
+    /** The target was there when BREACH began, so the breach counts as a kill however it goes. */
+    private boolean breachHadTarget;
 
     /** Creates the event and enters STALKING, or ends it FIZZLED at once if {@code target} is null. */
     WormEvent(int id, String world, List<UUID> ranking, UUID target, Vector3d wormStart, Timings timings,
@@ -191,6 +193,7 @@ public final class WormEvent {
                 } else {
                     follow(env);
                     if (elapsed >= length) {
+                        breachHadTarget = true;
                         enter(WormPhase.BREACH, timings.breach());
                     }
                 }
@@ -198,7 +201,7 @@ public final class WormEvent {
             case BREACH -> {
                 follow(env);
                 if (elapsed >= length) {
-                    boolean present = env.valid(target);
+                    boolean present = breachHadTarget;
                     if (present) {
                         enter(WormPhase.COOLDOWN, timings.cooldown());
                         finish(WormEndReason.DEVOURED);

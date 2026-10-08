@@ -7,6 +7,7 @@ import com.hypixel.hytale.protocol.AccumulationMode;
 import com.hypixel.hytale.protocol.Color;
 import com.hypixel.hytale.protocol.packets.camera.CameraShakeEffect;
 import com.hypixel.hytale.builtin.adventure.camera.asset.camerashake.CameraShake;
+import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
@@ -112,6 +113,38 @@ final class WormEffects implements WormEventListener {
     // ------------------------------------------------------------------ hooks
 
     @Override
+    public void onPhaseChange(WormEvent event, WormPhase old, WormPhase now) {
+        if (now != WormPhase.BREACH || event.getTarget() == null) {
+            return;
+        }
+        World world = Universe.get().getWorld(event.getWorldName());
+        PlayerRef target = Universe.get().getPlayer(event.getTarget());
+        if (world != null && target != null) {
+            startBreach(world, world.getEntityStore().getStore(), target, target, event.getSecondsLeft());
+        }
+    }
+
+    /**
+     * Starts the breach under a player. {@code victim} is the one swallowed, or null for a breach with no victim
+     * (/worm breach here), in which case {@code caller} gives the spot and the direction.
+     */
+    void startBreach(World world, Store<EntityStore> store, PlayerRef victim, PlayerRef caller, double seconds) {
+        Ref<EntityStore> ref = caller.getReference();
+        Vector3d p = position(store, caller);
+        HeadRotation head = ref == null ? null : store.getComponent(ref, HeadRotation.getComponentType());
+        if (p == null) {
+            return;
+        }
+        Vector3d dir = head == null ? new Vector3d(0, 0, 1) : head.getDirection();
+        double len = Math.hypot(dir.x, dir.z);
+        Vector3d heading = len < 1e-6 ? new Vector3d(0, 0, 1) : new Vector3d(dir.x / len, 0, dir.z / len);
+        Vector3d centre = new Vector3d(p.x, surfaceY(world, p.x, p.z, p.y), p.z);
+        jobs.stop(caller.getUuid(), "breach");
+        jobs.add(new BreachJob(this, world, caller.getUuid(), victim, victim == null ? null : ref, centre, heading,
+                seconds, config));
+    }
+
+    @Override
     public void onRetarget(WormEvent event, UUID oldTarget, UUID newTarget) {
         PlayerRef old = Universe.get().getPlayer(oldTarget);
         if (old != null) {
@@ -135,6 +168,9 @@ final class WormEffects implements WormEventListener {
             }
         }
         if (reason == WormEndReason.STOPPED) {
+            if (event.getTarget() != null) {
+                jobs.stop(event.getTarget(), "breach");
+            }
             for (UUID id : event.getGroup()) {
                 TargetFx f = fx.remove(id);
                 if (f != null) {
@@ -240,7 +276,7 @@ final class WormEffects implements WormEventListener {
                 (int) Math.floor(z) & ChunkUtil.SIZE_MASK) + 1.0;
     }
 
-    private static void particle(Store<EntityStore> store, String system, double x, double y, double z, float scale,
+    static void particle(Store<EntityStore> store, String system, double x, double y, double z, float scale,
                                  float far, List<Ref<EntityStore>> refs) {
         com.hypixel.hytale.server.core.universe.world.ParticleUtil.spawnParticleEffect(system, x, y, z, 0f, 0f, 0f,
                 scale, TAN, null, refs, store, far);
@@ -309,15 +345,21 @@ final class WormEffects implements WormEventListener {
     /** One ring-by-ring ripple round a point, shown to the owner and to players near it. */
     void ripple(World world, Store<EntityStore> store, PlayerRef owner, Vector3d at, int radius, float duration,
                 WormsOfArrakisConfig cfg) {
+        ripple(world, store, owner, owner.getUuid(), at, radius, duration, cfg.getRippleViewDistance(), cfg);
+    }
+
+    /** {@code owner} may be null (a breach with nobody there); {@code ownerId} owns the job so it is undone with them. */
+    void ripple(World world, Store<EntityStore> store, PlayerRef owner, UUID ownerId, Vector3d at, int radius,
+                float duration, double viewRange, WormsOfArrakisConfig cfg) {
         List<double[]> avoid = new ArrayList<>();
-        List<PlayerRef> viewers = near(world, store, at, cfg.getRippleViewDistance(), owner);
+        List<PlayerRef> viewers = near(world, store, at, viewRange, owner);
         for (PlayerRef v : viewers) {
             Vector3d p = position(store, v);
             if (p != null) {
                 avoid.add(new double[] {p.x, p.y, p.z});
             }
         }
-        RippleJob job = RippleJob.create(world, owner.getUuid(), viewers, new double[] {at.x, at.y, at.z}, radius,
+        RippleJob job = RippleJob.create(world, ownerId, viewers, new double[] {at.x, at.y, at.z}, radius,
                 sand.get(), WormTestCommand.layerBlockIds(), duration, avoid);
         if (job.cellCount() > 0) {
             jobs.add(job);
@@ -340,7 +382,16 @@ final class WormEffects implements WormEventListener {
             vignette = lerp(cfg.getVignetteStalkLevel(), 1.0, q);
             slow = lerp(1.0, cfg.getSlowFloor(), q);
         }
-        fxOf(target).want(vignette, slow);
+        TargetFx targetFx = fxOf(target);
+        targetFx.want(vignette, slow);
+        double zoom = 0;
+        if (phase == WormPhase.LOCKED) {
+            double zs = Math.min(cfg.getZoomSeconds(), Math.max(lock, 0.001));
+            zoom = left <= zs ? clamp01(1 - left / zs) : 0;
+        } else if (phase == WormPhase.BREACH) {
+            zoom = 1;
+        }
+        targetFx.wantZoom(zoom);
 
         if (cfg.isCameraShake()) {
             shake(s, target, phase, left, cfg);
@@ -367,6 +418,7 @@ final class WormEffects implements WormEventListener {
 
     static void shake(PlayerRef player, String shakeId, double intensity) {
         int index = CameraShake.getAssetMap().getIndex(shakeId);
+        intensity *= WormsOfArrakisPlugin.get().config().getCameraShakeScale();
         if (index != Integer.MIN_VALUE && intensity > 0) {
             player.getPacketHandler().writeNoCache(new CameraShakeEffect(index, (float) intensity, AccumulationMode.Set));
         }
@@ -417,7 +469,7 @@ final class WormEffects implements WormEventListener {
         return t == null ? null : new Vector3d(t.getPosition());
     }
 
-    private static List<Ref<EntityStore>> refs(List<PlayerRef> players) {
+    static List<Ref<EntityStore>> refs(List<PlayerRef> players) {
         List<Ref<EntityStore>> list = new ArrayList<>();
         for (PlayerRef p : players) {
             Ref<EntityStore> ref = p.getReference();

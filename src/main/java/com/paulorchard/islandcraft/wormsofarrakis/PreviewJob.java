@@ -17,7 +17,7 @@ import java.util.function.Supplier;
  */
 final class PreviewJob implements WormTestSystem.Job {
 
-    static final List<String> EFFECTS = List.of("wormsign", "rumble", "ripple", "vignette", "slow", "shake");
+    static final List<String> EFFECTS = List.of("wormsign", "rumble", "ripple", "vignette", "slow", "shake", "zoom");
 
     private final WormEffects fx;
     private final World world;
@@ -104,6 +104,7 @@ final class PreviewJob implements WormTestSystem.Job {
                     fx.ripple(world, store, player, pos, (int) Math.round(cfg.getRippleRadius()), 1.2f, cfg);
                 }
             }
+            case "zoom" -> fx.fxOf(player).wantZoom(u);
             case "vignette" -> fx.fxOf(player).want(u, 1.0);
             case "slow" -> fx.fxOf(player).want(0, 1.0 - (1.0 - cfg.getSlowFloor()) * u);
             case "shake" -> {

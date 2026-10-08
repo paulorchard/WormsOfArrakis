@@ -79,10 +79,10 @@ public class WormsOfArrakisConfig {
                             config -> config.lockSeconds)
                     .documentation("LOCKED phase length. No escape and no retarget.")
                     .add()
-                    .append(new KeyedCodec<>("BreachSeconds", Codec.DOUBLE, false),
+                    .append(new KeyedCodec<>("BreachSequenceSeconds", Codec.DOUBLE, false),
                             (config, value) -> config.breachSeconds = value,
                             config -> config.breachSeconds)
-                    .documentation("BREACH phase length until the breach effect exists (stub).")
+                    .documentation("BREACH phase length: the whole breach sequence and settling.")
                     .add()
                     .append(new KeyedCodec<>("CooldownSeconds", Codec.DOUBLE, false),
                             (config, value) -> config.cooldownSeconds = value,
@@ -250,6 +250,126 @@ public class WormsOfArrakisConfig {
                             config -> config.fadeOutSeconds)
                     .documentation("Effects of an old target fade out over this long on retarget.")
                     .add()
+                    .append(new KeyedCodec<>("BreachBoomAt", Codec.DOUBLE, false),
+                            (config, value) -> config.breachBoomAt = value,
+                            config -> config.breachBoomAt)
+                    .documentation("Seconds from the start of BREACH: the dust ring, the heave and the boom.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachWormAt", Codec.DOUBLE, false),
+                            (config, value) -> config.breachWormAt = value,
+                            config -> config.breachWormAt)
+                    .documentation("The stand-in worm shoots up through the surface.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachLiftAt", Codec.DOUBLE, false),
+                            (config, value) -> config.breachLiftAt = value,
+                            config -> config.breachLiftAt)
+                    .documentation("The target is lifted with the worm from here.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachSwallowAt", Codec.DOUBLE, false),
+                            (config, value) -> config.breachSwallowAt = value,
+                            config -> config.breachSwallowAt)
+                    .documentation("The worm is at full height; the target is swallowed (killed, or thrown with DevourKills off).")
+                    .add()
+                    .append(new KeyedCodec<>("BreachDiveAt", Codec.DOUBLE, false),
+                            (config, value) -> config.breachDiveAt = value,
+                            config -> config.breachDiveAt)
+                    .documentation("The worm starts to arc over and dive after hanging from the swallow.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachDiveEnd", Codec.DOUBLE, false),
+                            (config, value) -> config.breachDiveEnd = value,
+                            config -> config.breachDiveEnd)
+                    .documentation("The worm is under again; a second, lower burst and a falling rumble. It is removed just after.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachWormSize", Codec.DOUBLE, false),
+                            (config, value) -> config.breachWormSize = value,
+                            config -> config.breachWormSize)
+                    .documentation("Scale of the breach worm. 3 is the same worm as /wormtest worm: about 18 blocks wide and 30 above the surface at the top.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachDustScale", Codec.DOUBLE, false),
+                            (config, value) -> config.breachDustScale = value,
+                            config -> config.breachDustScale)
+                    .documentation("Particle scale of the breach dust.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachDebrisScale", Codec.DOUBLE, false),
+                            (config, value) -> config.breachDebrisScale = value,
+                            config -> config.breachDebrisScale)
+                    .documentation("Particle scale of the thrown chunks of sand.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachRippleRadius", Codec.DOUBLE, false),
+                            (config, value) -> config.breachRippleRadius = value,
+                            config -> config.breachRippleRadius)
+                    .documentation("Blocks. Radius of the heave of fake blocks at the start of the breach.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachShakeRange", Codec.DOUBLE, false),
+                            (config, value) -> config.breachShakeRange = value,
+                            config -> config.breachShakeRange)
+                    .documentation("Blocks. Players this close to the breach get camera shake and see the worm.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachShakeStrength", Codec.DOUBLE, false),
+                            (config, value) -> config.breachShakeStrength = value,
+                            config -> config.breachShakeStrength)
+                    .documentation("Intensity of the breach camera shake (times ShakeStrength).")
+                    .add()
+                    .append(new KeyedCodec<>("BreachBoomVolume", Codec.DOUBLE, false),
+                            (config, value) -> config.breachBoomVolume = value,
+                            config -> config.breachBoomVolume)
+                    .documentation("Volume of the breach sounds within BreachShakeRange.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachFarVolume", Codec.DOUBLE, false),
+                            (config, value) -> config.breachFarVolume = value,
+                            config -> config.breachFarVolume)
+                    .documentation("Volume of the breach sounds for players further away, up to GroupRadius. Flat.")
+                    .add()
+                    .append(new KeyedCodec<>("DevourKills", Codec.BOOLEAN, false),
+                            (config, value) -> config.devourKills = value,
+                            config -> config.devourKills)
+                    .documentation("False: the breach only throws the target and hurts them badly (they survive), for testing or a gentler worm.")
+                    .add()
+                    .append(new KeyedCodec<>("DevourDropsItems", Codec.BOOLEAN, false),
+                            (config, value) -> config.devourDropsItems = value,
+                            config -> config.devourDropsItems)
+                    .documentation("False: the target dies with an empty inventory and nothing is dropped.")
+                    .add()
+                    .append(new KeyedCodec<>("DevourHurtFraction", Codec.DOUBLE, false),
+                            (config, value) -> config.devourHurtFraction = value,
+                            config -> config.devourHurtFraction)
+                    .documentation("With DevourKills off, the share of the target current health taken (never lethal).")
+                    .add()
+                    .append(new KeyedCodec<>("KnockbackRadius", Codec.DOUBLE, false),
+                            (config, value) -> config.knockbackRadius = value,
+                            config -> config.knockbackRadius)
+                    .documentation("Blocks. Bystanders this close to the target when the worm erupts are thrown back, unharmed.")
+                    .add()
+                    .append(new KeyedCodec<>("KnockbackForce", Codec.DOUBLE, false),
+                            (config, value) -> config.knockbackForce = value,
+                            config -> config.knockbackForce)
+                    .documentation("Horizontal speed in blocks per second given to a thrown bystander (or to a surviving target).")
+                    .add()
+                    .append(new KeyedCodec<>("CameraShakeScale", Codec.DOUBLE, false),
+                            (config, value) -> config.cameraShakeScale = value,
+                            config -> config.cameraShakeScale)
+                    .documentation("Overall multiplier on every camera shake this mod sends (1 = the original strength).")
+                    .add()
+                    .append(new KeyedCodec<>("CameraZoom", Codec.BOOLEAN, false),
+                            (config, value) -> config.cameraZoom = value,
+                            config -> config.cameraZoom)
+                    .documentation("Pull the target camera out into third person in the last ZoomSeconds of LOCKED so they can see the worm attack.")
+                    .add()
+                    .append(new KeyedCodec<>("ZoomSeconds", Codec.DOUBLE, false),
+                            (config, value) -> config.zoomSeconds = value,
+                            config -> config.zoomSeconds)
+                    .documentation("The camera zoom out takes this long, ending when LOCKED ends.")
+                    .add()
+                    .append(new KeyedCodec<>("ZoomFromDistance", Codec.DOUBLE, false),
+                            (config, value) -> config.zoomFromDistance = value,
+                            config -> config.zoomFromDistance)
+                    .documentation("Camera distance in blocks the zoom starts from (the usual third person distance).")
+                    .add()
+                    .append(new KeyedCodec<>("ZoomDistance", Codec.DOUBLE, false),
+                            (config, value) -> config.zoomDistance = value,
+                            config -> config.zoomDistance)
+                    .documentation("Camera distance in blocks at the end of the zoom: about three times the usual third person distance.")
+                    .add()
                     // END GENERATED CODEC
                     .build();
 
@@ -266,7 +386,7 @@ public class WormsOfArrakisConfig {
     private double fizzleScoreFraction = 0.5;
     private double stalkSeconds = 40;
     private double lockSeconds = 4;
-    private double breachSeconds = 3;
+    private double breachSeconds = 8;
     private double cooldownSeconds = 120;
     private boolean retargetKeepsClock = false;
     private double wormStartMinDistance = 120;
@@ -301,6 +421,30 @@ public class WormsOfArrakisConfig {
     private double slowJumpFloor = 0.5;
     private String slowMethod = "effect";
     private double fadeOutSeconds = 1;
+    private double breachBoomAt = 0;
+    private double breachWormAt = 0.2;
+    private double breachLiftAt = 0.6;
+    private double breachSwallowAt = 1.2;
+    private double breachDiveAt = 1.8;
+    private double breachDiveEnd = 3;
+    private double breachWormSize = 3;
+    private double breachDustScale = 6;
+    private double breachDebrisScale = 3;
+    private double breachRippleRadius = 8;
+    private double breachShakeRange = 40;
+    private double breachShakeStrength = 1.5;
+    private double breachBoomVolume = 1;
+    private double breachFarVolume = 0.8;
+    private boolean devourKills = true;
+    private boolean devourDropsItems = false;
+    private double devourHurtFraction = 0.8;
+    private double knockbackRadius = 4;
+    private double knockbackForce = 16;
+    private double cameraShakeScale = 0.5;
+    private boolean cameraZoom = true;
+    private double zoomSeconds = 2;
+    private double zoomFromDistance = 5;
+    private double zoomDistance = 15;
     // END GENERATED FIELDS
 
     public String[] getSandBlocks() {
@@ -382,6 +526,12 @@ public class WormsOfArrakisConfig {
     public boolean isDebugChat() {
         return debugChat;
     }
+
+
+
+
+
+
 
     // GENERATED GETTERS
     public double getPathEaseExponent() {
@@ -490,6 +640,102 @@ public class WormsOfArrakisConfig {
 
     public double getFadeOutSeconds() {
         return fadeOutSeconds;
+    }
+
+    public double getBreachBoomAt() {
+        return breachBoomAt;
+    }
+
+    public double getBreachWormAt() {
+        return breachWormAt;
+    }
+
+    public double getBreachLiftAt() {
+        return breachLiftAt;
+    }
+
+    public double getBreachSwallowAt() {
+        return breachSwallowAt;
+    }
+
+    public double getBreachDiveAt() {
+        return breachDiveAt;
+    }
+
+    public double getBreachDiveEnd() {
+        return breachDiveEnd;
+    }
+
+    public double getBreachWormSize() {
+        return breachWormSize;
+    }
+
+    public double getBreachDustScale() {
+        return breachDustScale;
+    }
+
+    public double getBreachDebrisScale() {
+        return breachDebrisScale;
+    }
+
+    public double getBreachRippleRadius() {
+        return breachRippleRadius;
+    }
+
+    public double getBreachShakeRange() {
+        return breachShakeRange;
+    }
+
+    public double getBreachShakeStrength() {
+        return breachShakeStrength;
+    }
+
+    public double getBreachBoomVolume() {
+        return breachBoomVolume;
+    }
+
+    public double getBreachFarVolume() {
+        return breachFarVolume;
+    }
+
+    public boolean isDevourKills() {
+        return devourKills;
+    }
+
+    public boolean isDevourDropsItems() {
+        return devourDropsItems;
+    }
+
+    public double getDevourHurtFraction() {
+        return devourHurtFraction;
+    }
+
+    public double getKnockbackRadius() {
+        return knockbackRadius;
+    }
+
+    public double getKnockbackForce() {
+        return knockbackForce;
+    }
+
+    public double getCameraShakeScale() {
+        return cameraShakeScale;
+    }
+
+    public boolean isCameraZoom() {
+        return cameraZoom;
+    }
+
+    public double getZoomSeconds() {
+        return zoomSeconds;
+    }
+
+    public double getZoomFromDistance() {
+        return zoomFromDistance;
+    }
+
+    public double getZoomDistance() {
+        return zoomDistance;
     }
     // END GENERATED GETTERS
 }

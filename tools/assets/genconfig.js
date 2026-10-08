@@ -29,6 +29,30 @@ const rows = [
   ['SlowJumpFloor', 'double', 0.5, 'Share of normal jump force the target is down to by the end of LOCKED (needs SlowMethod effect or settings both working).'],
   ['SlowMethod', 'string', 'effect', 'effect: entity effects with a horizontal speed multiplier in steps. settings: MovementManager settings, smooth. Jump force always uses settings.'],
   ['FadeOutSeconds', 'double', 1.0, 'Effects of an old target fade out over this long on retarget.'],
+  ['BreachBoomAt','double',0,'Seconds from the start of BREACH: the dust ring, the heave and the boom.'],
+  ['BreachWormAt','double',0.2,'The stand-in worm shoots up through the surface.'],
+  ['BreachLiftAt','double',0.6,'The target is lifted with the worm from here.'],
+  ['BreachSwallowAt','double',1.2,'The worm is at full height; the target is swallowed (killed, or thrown with DevourKills off).'],
+  ['BreachDiveAt','double',1.8,'The worm starts to arc over and dive after hanging from the swallow.'],
+  ['BreachDiveEnd','double',3,'The worm is under again; a second, lower burst and a falling rumble. It is removed just after.'],
+  ['BreachWormSize', 'double', 3.0, 'Scale of the breach worm. 3 is the same worm as /wormtest worm: about 18 blocks wide and 30 above the surface at the top.'],
+  ['BreachDustScale','double',6,'Particle scale of the breach dust.'],
+  ['BreachDebrisScale','double',3,'Particle scale of the thrown chunks of sand.'],
+  ['BreachRippleRadius','double',8,'Blocks. Radius of the heave of fake blocks at the start of the breach.'],
+  ['BreachShakeRange','double',40,'Blocks. Players this close to the breach get camera shake and see the worm.'],
+  ['BreachShakeStrength','double',1.5,'Intensity of the breach camera shake (times ShakeStrength).'],
+  ['BreachBoomVolume','double',1,'Volume of the breach sounds within BreachShakeRange.'],
+  ['BreachFarVolume','double',0.8,'Volume of the breach sounds for players further away, up to GroupRadius. Flat.'],
+  ['DevourKills','boolean',true,'False: the breach only throws the target and hurts them badly (they survive), for testing or a gentler worm.'],
+  ['DevourDropsItems','boolean',false,'False: the target dies with an empty inventory and nothing is dropped.'],
+  ['DevourHurtFraction','double',0.8,'With DevourKills off, the share of the target current health taken (never lethal).'],
+  ['KnockbackRadius','double',4,'Blocks. Bystanders this close to the target when the worm erupts are thrown back, unharmed.'],
+  ['KnockbackForce','double',16,'Horizontal speed in blocks per second given to a thrown bystander (or to a surviving target).'],
+  ['CameraShakeScale','double',0.5,'Overall multiplier on every camera shake this mod sends (1 = the original strength).'],
+  ['CameraZoom','boolean',true,'Pull the target camera out into third person in the last ZoomSeconds of LOCKED so they can see the worm attack.'],
+  ['ZoomSeconds','double',2,'The camera zoom out takes this long, ending when LOCKED ends.'],
+  ['ZoomFromDistance','double',5,'Camera distance in blocks the zoom starts from (the usual third person distance).'],
+  ['ZoomDistance','double',15,'Camera distance in blocks at the end of the zoom: about three times the usual third person distance.'],
 ];
 const camel = (n) => n[0].toLowerCase() + n.slice(1);
 const jt = { double: 'double', boolean: 'boolean', string: 'String' };
@@ -41,9 +65,18 @@ for (const r of rows) {
   getters += `    public ${jt[r[1]]} ${r[1] === 'boolean' ? 'is' : 'get'}${r[0]}() {\n        return ${f};\n    }\n\n`;
   codecs += `                    .append(new KeyedCodec<>("${r[0]}", ${codec[r[1]]}, false),\n                            (config, value) -> config.${f} = value,\n                            config -> config.${f})\n                    .documentation(${JSON.stringify(r[3])})\n                    .add()\n`;
 }
-let s = fs.readFileSync(file, 'utf8');
-const cut = (name) => { s = s.replace(new RegExp(`\n?[ ]*// GENERATED ${name}[\s\S]*?// END GENERATED ${name}\n`), ''); };
-['FIELDS', 'GETTERS', 'CODEC'].forEach(cut);
+const NL = String.fromCharCode(10);
+const strip = (text) => {
+  const out = [];
+  let skip = false;
+  for (const l of text.split(NL)) {
+    if (l.includes('// END GENERATED')) skip = false;
+    else if (l.includes('// GENERATED')) skip = true;
+    else if (!skip) out.push(l);
+  }
+  return out.join(NL);
+};
+let s = strip(fs.readFileSync(file, 'utf8'));
 s = s.replace('                    .build();', `                    // GENERATED CODEC\n${codecs}                    // END GENERATED CODEC\n                    .build();`);
 s = s.replace('    private boolean debugChat = false;', `    private boolean debugChat = false;\n    // GENERATED FIELDS\n${fields}    // END GENERATED FIELDS`);
 s = s.replace(/\}\s*$/, `\n    // GENERATED GETTERS\n${getters.trimEnd()}\n    // END GENERATED GETTERS\n}\n`);

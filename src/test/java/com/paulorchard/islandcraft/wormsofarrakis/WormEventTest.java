@@ -189,4 +189,23 @@ class WormEventTest {
         assertEquals(WormPhase.ENDED, d.getPhase());
         assertEquals(WormEndReason.DEVOURED, d.getEndReason());
     }
+
+    @Test
+    void breachEndsDevouredEvenThoughTheTargetIsDeadByThen() {
+        WormEvent e = event(a, T);
+        run(e, 14.6); // into BREACH
+        assertEquals(WormPhase.BREACH, e.getPhase());
+        online.remove(a); // swallowed: no longer a valid player
+        run(e, 3.2);
+        assertEquals(WormPhase.COOLDOWN, e.getPhase());
+        assertEquals(WormEndReason.DEVOURED, e.getEndReason());
+    }
+
+    @Test
+    void easeInMakesTheWormSlowAtFirst() {
+        WormEvent e = new WormEvent(1, "default", List.of(a), a, new Vector3d(100, 80, 0), new WormEvent.Timings(10, 4, 3, 120, false, 2.0), false, hooks);
+        run(e, 5.0); // half the time
+        double covered = 100 - e.getWormPosition().x;
+        assertTrue(covered > 20 && covered < 30, "covered " + covered); // a quarter, not a half
+    }
 }

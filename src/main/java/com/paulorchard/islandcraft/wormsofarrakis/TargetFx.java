@@ -2,7 +2,11 @@ package com.paulorchard.islandcraft.wormsofarrakis;
 
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.protocol.ClientCameraView;
 import com.hypixel.hytale.protocol.MovementSettings;
+import com.hypixel.hytale.protocol.PositionDistanceOffsetType;
+import com.hypixel.hytale.protocol.ServerCameraSettings;
+import com.hypixel.hytale.protocol.packets.camera.SetServerCamera;
 import com.hypixel.hytale.server.core.asset.type.entityeffect.config.EntityEffect;
 import com.hypixel.hytale.server.core.asset.type.entityeffect.config.OverlapBehavior;
 import com.hypixel.hytale.server.core.entity.effect.EffectControllerComponent;
@@ -36,6 +40,11 @@ final class TargetFx {
     private double vigCur;
     private double slowCur = 1.0;
     private boolean dying;
+    private double zoomWant;
+    private double zoomCur;
+    private boolean zoomOn;
+    private double zoomSent = -1;
+    private double zoomClock;
 
     private int vigLevel;
     private int slowPercent = 100;
@@ -56,11 +65,18 @@ final class TargetFx {
         slowWant = slow;
     }
 
+    /** The camera zoom wanted, 0 (the player normal view) to 1 (fully pulled out). */
+    void wantZoom(double zoom) {
+        dying = false;
+        zoomWant = zoom;
+    }
+
     /** Fades everything out, then the entry can be dropped. */
     void fadeOut() {
         dying = true;
         vigWant = 0;
         slowWant = 1.0;
+        zoomWant = 0;
     }
 
     boolean isDying() {
@@ -69,7 +85,7 @@ final class TargetFx {
 
     /** True once a dying entry has nothing left applied. */
     boolean finished() {
-        return dying && vigLevel == 0 && slowPercent == 100 && !settingsTouched;
+        return dying && vigLevel == 0 && slowPercent == 100 && !settingsTouched && !zoomOn;
     }
 
     /** Runs on the world thread. Returns false when the entry should be dropped. */
@@ -99,6 +115,7 @@ final class TargetFx {
                 applySlowEffect(store, ref, effects, refresh);
             }
         }
+        applyZoom(ref, cfg, dt);
         settingsClock += dt;
         if (settingsClock >= 0.1) {
             settingsClock = 0;
@@ -136,6 +153,39 @@ final class TargetFx {
             add(store, ref, effects, "Arrakis_Worm_Slow_" + percent);
         }
         slowPercent = percent;
+    }
+
+    /**
+     * Pulls the camera out into a custom third person view (a ServerCameraSettings with a distance) as the zoom
+     * rises, and gives the player their own view back (the same packet the game /camera reset sends) when it ends.
+     */
+    private void applyZoom(Ref<EntityStore> ref, WormsOfArrakisConfig cfg, double dt) {
+        double fade = Math.max(cfg.getFadeOutSeconds(), 0.05);
+        zoomCur = zoomWant >= zoomCur ? zoomWant : Math.max(zoomWant, zoomCur - dt / fade);
+        zoomClock += dt;
+        if (!cfg.isCameraZoom() || zoomCur < 0.001) {
+            if (zoomOn) {
+                player.getPacketHandler().writeNoCache(new SetServerCamera(ClientCameraView.Custom, false, null));
+                zoomOn = false;
+                zoomSent = -1;
+            }
+            return;
+        }
+        double q = zoomCur * zoomCur * (3 - 2 * zoomCur);
+        double distance = cfg.getZoomFromDistance() + (cfg.getZoomDistance() - cfg.getZoomFromDistance()) * q;
+        if (Math.abs(distance - zoomSent) < 0.05 || zoomClock < 0.05) {
+            return;
+        }
+        zoomClock = 0;
+        ServerCameraSettings settings = new ServerCameraSettings();
+        settings.isFirstPerson = false;
+        settings.distance = (float) distance;
+        settings.eyeOffset = true;
+        settings.positionLerpSpeed = 0.3f;
+        settings.positionDistanceOffsetType = PositionDistanceOffsetType.DistanceOffsetRaycast;
+        player.getPacketHandler().writeNoCache(new SetServerCamera(ClientCameraView.Custom, false, settings));
+        zoomOn = true;
+        zoomSent = distance;
     }
 
     /** Jump force always, and the whole speed when SlowMethod is settings. Sent at most ten times a second. */
@@ -214,6 +264,13 @@ final class TargetFx {
         } catch (Throwable t) {
             WormsOfArrakisPlugin.get().getLogger().at(Level.WARNING).withCause(t).log("Could not restore worm effects");
         }
+        if (zoomOn) {
+            player.getPacketHandler().writeNoCache(new SetServerCamera(ClientCameraView.Custom, false, null));
+            zoomOn = false;
+            zoomSent = -1;
+        }
+        zoomCur = 0;
+        zoomWant = 0;
         vigLevel = 0;
         slowPercent = 100;
         settingsTouched = false;

@@ -434,6 +434,84 @@ Runs one effect for the caller only, ramping from nothing to full over the secon
 - No stop-sound packet: sounds cannot be silenced, only not repeated (above).
 - Jump height can only be changed through the movement-settings route, which did not slow the player in the earlier test, so the jump reduction may not work even if the speed reduction does.
 
+## Prompt 20: the breach
+
+**Status: built, loads clean, run headless once end to end; not yet seen, heard or tried on a player.** There are no screenshots or recordings, and none of the performance numbers below come from a client.
+
+### The sequence as built (`BreachJob`, scripted on the clock of the BREACH phase)
+
+All times are config values (seconds from the start of BREACH).
+
+| Time (config) | What |
+| --- | --- |
+| 0.0 (`BreachBoomAt`) | A ring of 12 dust bursts out from under the target (`Block_Break_Dust`, `Block_Land_Hard_Dust`, centre `Block_Break_Dirt`); the heave: a ripple of radius `BreachRippleRadius` (8) in 0.6 s (the prompt 17 fake layer blocks), shown to everyone within `BreachShakeRange` (40); the boom (`SFX_Sand_Break` at pitch 0.5 with `Statue_Low` at 0.6 and `Storm_Low` at 0.7); a strong `Arrakis_Worm_Lock` shake for everyone within 40 blocks. |
+| 0.2 (`BreachWormAt`) | The stand-in worm (the placeholder prop, scale `BreachWormScale`, 1 = 6 wide and 10 above the surface) shoots up under the target with an ease-out. From now on every 0.1 s: a column of dust bursts stacked up its height, four on the surface ring, three thrown chunks (`Block_Break_Sand`, `Block_Break_Dirt`) at random points out to 9 blocks and up to 90% of its height. Bystanders within `KnockbackRadius` (4) of the target are thrown back with `KnockbackForce` (16 b/s, a little upward), no damage. |
+| 0.6 (`BreachLiftAt`) | The target is lifted with it: up to 80% of the worm height, easing in and out, moving a little inward, by a `Teleport` each tick. |
+| 1.2 (`BreachSwallowAt`) | The worm is at full height and tilts. The swallow sound (`SFX_Sand_Break` at 0.35, `Ice_Low` at 0.5) and a lock shake. With `DevourKills` (default true): the inventory is emptied (hotbar, storage, armour, utility, tools, backpack) unless `DevourDropsItems`, then the target takes lethal damage from the worm (`Arrakis_Worm_Devour` cause; death message "<player> was devoured by a sandworm"). With `DevourKills` off: `DevourHurtFraction` (80%) of their current health, never lethal, and they are thrown at 1.5 x `KnockbackForce`. |
+| 1.2 to 1.8 (`BreachDiveAt`) | The worm hangs, tilting further. |
+| 1.8 to 3.0 (`BreachDiveEnd`) | It arcs over (tilt to 1.4 rad, moving forward 0.9 of its height in the direction the target was facing) and dives to 1.25 heights under, ease-in. The dive sound at 1.8 and a second one at 3.0. |
+| 3.0 | A second, lower burst: a ring of eight dust bursts where it went under, `Block_Break_Sand` and `Sand_Storm`, a pass shake. The worm is removed 0.3 s later. |
+| 3.0 to 8.0 (`BreachSequenceSeconds`) | Settling: rumble triggers at +0.5, +2.0 and +3.5 s at volumes 0.4, 0.3 and 0.2; the wormsign trail moves away from the breach along the dive direction at about 14 blocks per second for the first four fifths of the time, drawn for anyone within `WormsignViewDistance`. |
+
+Everyone within `GroupRadius` (200) hears the breach sounds (`BreachBoomVolume` 1.0 within 40 blocks, `BreachFarVolume` 0.8 flat beyond), and the dust is spawned for all of them with a visible distance of `GroupRadius` plus 60.
+
+### Terrain and clean-up
+
+The world is never edited. The heave is fake blocks (restored from the world at the end, on disconnect and on shutdown, as in prompt 19); the dust and chunks are particles that end by themselves; the only entity is the worm prop, marked not saved with its chunk, removed at 3.3 s and again in `abort`. The job is owned by the target, so it is aborted (worm removed, heave restored) if the target disconnects, and by `/worm stop`, and by the plugin shutting down. Verified headless: a full 8 s run with no players spawns the worm, runs the whole script and removes it ("breach: ran 239 ticks (8.0 s), worm removed").
+
+### Death and loot
+
+- The inventory is cleared before the lethal damage, so nothing can drop: the game has no gravestone or corpse container (only the body model is removed after death), and its loss-on-death mode works on what is in the inventory. Armour, hotbar and the rest are emptied by the same clear.
+- The cause asset has no durability or stamina loss and bypasses resistances, so armour cannot save the target.
+- After the kill the event still ends DEVOURED and the group goes into cooldown (new rule: if the target was there when BREACH began it counts as devoured even though they are dead by the end; covered by a unit test).
+- The target's vignette and slowdown are restored on death (`TargetFx` sees the death component), and the respawn resets movement settings.
+
+### New commands and config
+
+- `/worm breach [player|self]`: a forced event that skips the stalk and lock (0.05 s each) and goes straight to BREACH under that player (same refusals as `/worm trigger`). `/worm breach here`: plays the effect at the caller's position with no victim.
+- Config keys: `BreachBoomAt`, `BreachWormAt`, `BreachLiftAt`, `BreachSwallowAt`, `BreachDiveAt`, `BreachDiveEnd`, `BreachSequenceSeconds` (8; **renamed from `BreachSeconds`, which an older saved config holds as 3 and would cut the settling short**), `BreachWormScale`, `BreachDustScale` (6), `BreachDebrisScale` (3), `BreachRippleRadius`, `BreachShakeRange`, `BreachShakeStrength` (1.5), `BreachBoomVolume`, `BreachFarVolume`, `DevourKills`, `DevourDropsItems`, `DevourHurtFraction`, `KnockbackRadius`, `KnockbackForce`.
+
+### What was not done, and why
+
+- **No new particle systems or textures** (`Arrakis_Worm_Breach_Dust`, `_Debris`, `_Settle`). The brief allows reusing the vanilla systems layered and scaled, and without a client to compare I could not tell what a new texture should look like. Debris is the vanilla sand and dirt break particles at random points out and up, not entities: it costs nothing to clean up and cannot leave anything behind.
+- **"Remove them from the world"** is done as death, which the game handles. A player entity cannot be hidden mid-air by a plugin without a lot of machinery, so the target is lifted, killed at the top and falls as the standard death.
+- **The worm tilt direction** (pitch sign) and whether the client shows pitch on a prop at all are unknown; if it tilts away from the target rather than over them, flip the sign in `BreachJob.moveWorm`.
+- **Lift and knockback**: the lift uses the game's own `Teleport` component each tick, the throw uses a `Velocity` instruction; whether the client accepts both smoothly (or applies the throw to a player at all) is not known.
+
+### Checks (to be done in game)
+
+1. `/worm breach here` from 10, 40 and 150 blocks away: dust column, worm and sound at every distance; nothing left afterwards.
+2. A full `/worm trigger self 40 4`: the whole chain from wormsign to respawn; no errors in the log.
+3. On respawn: empty inventory and hotbar, no armour, normal stats and speed, no fake blocks.
+4. A second player 10 blocks away is shaken and sees all; one 3 blocks away is thrown, unharmed.
+5. `DevourKills` false: thrown and badly hurt, alive.
+6. Twenty breaches in a row, then look for leftover worms, particles or raised blocks and watch the frame rate.
+7. Disconnect the target during BREACH: clean end, no errors.
+8. Screenshots, and a recording if possible, into `Screenshots/`.
+
+### Performance (estimates, not measured)
+
+Per 0.1 s tick of the plume: up to 8 column bursts, 4 ring bursts and 3 chunk bursts, about 15 particle systems per tick, so about 150 per second for 2.8 s, sent to each player within 200 blocks. The heave at radius 8 is about 200 fake-block updates in a few ticks (the prompt 17 numbers: 9 bytes per update, so under 2 KB). Both are small next to a busy frame, but the effect on a client's frame rate with this much dust at scale 6 has not been seen.
+
+### Weakest parts and what would improve them
+
+1. **The worm**: the stand-in is a flat sandstone box, so the head, mouth and the swallow cannot read. A real model with an open mouth and a mouth attachment point (the target is lifted towards it) would change the most.
+2. **The sound**: the boom is a pitched-down sand break and a mono rumble layered; there is no roar. A proper deep stereo boom, a roar or hiss for the swallow, and a long falling rumble for the dive would change the feel most. Pitch can only be lowered at play time, and one-shot sounds cannot be stopped.
+3. **The dust**: vanilla break particles are small and rounded for blocks, not a wall. A custom tall dust-column system (wide, slow, tan, with `SandCloud_erosion` and `Explosion_Shockwave` textures) and sand-chunk debris particles would sell the Dune: Awakening reference.
+
+### Things the game would not allow, and what was done
+
+- A plugin cannot stop a sound, so the settle rumble is three separate quiet triggers rather than a fade.
+- A single particle system has one scale and colour per spawn, so the wall of dust is stacked bursts rather than one tall plume.
+- The target cannot be hidden without killing them, so the swallow is the death itself.
+
+### Changes after the first review of prompts 19 and 20
+
+- Camera shake halved: every shake this mod sends is multiplied by `CameraShakeScale` (new key, default 0.5; set 1 for the original strength). A new key rather than lower defaults, because an older saved config would have kept the old `ShakeStrength`.
+- Camera zoom for the target: in the last `ZoomSeconds` (2) of LOCKED the camera pulls out to `ZoomDistance` (15 blocks) from `ZoomFromDistance` (5), held through the breach, and the player view is given back (the game's camera reset packet) when the effect ends, on death, on retarget and on shutdown. It sends a custom camera, `SetServerCamera(Custom, false, ServerCameraSettings)` with `isFirstPerson` false, a distance and a raycast so it does not clip into terrain, about ten times a second while it moves. The game's own third person distance is a client setting that the server cannot read, so 5 and 15 are assumptions: set `ZoomFromDistance` and `ZoomDistance` to match what you see. `CameraZoom` false turns it off; `/worm preview zoom` tries it alone. Not yet seen.
+
+- The breach worm now matches `/wormtest worm`: same model, and scale 3 by default (about 18 blocks wide and 30 above the surface; the breach had been using scale 1, a third of the size). The key is now `BreachWormSize` (the old `BreachWormScale` is ignored, because the saved config held 1.0). The dust rings, thrown chunks, heave and knockback radius scale with the worm width.
+
 ## Cleanup after prompt 20
 
 Remove or hide `WormTestCommand`, `Positional`, `WormSelfTest`, `WormTestSystem`, the job classes and the `Arrakis_Worm_*` test weathers, effects and sound events that the real worm does not use. Keep `Worms_of_Arrakis.json` (`SandBlocks`) and the placeholder model until the real one exists.
