@@ -68,9 +68,9 @@ final class RippleJob implements WormTestSystem.Job {
      * @param avoid  positions of everyone who must not have a block appear inside them
      */
     static RippleJob create(World world, UUID owner, List<PlayerRef> viewers, double[] centre, int radius,
-                            Set<Integer> sand, int[] layerIds, List<double[]> avoid) {
+                            Set<Integer> sand, int[] layerIds, float duration, List<double[]> avoid) {
         RippleJob job = new RippleJob(world, owner, viewers);
-        job.step = DURATION / (radius + 1.0f);
+        job.step = duration / (radius + 1.0f);
         java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
         int cx = (int) Math.floor(centre[0]);
         int cz = (int) Math.floor(centre[2]);

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Boots the game's server with no client, with this mod and Dunes of Arrakis loaded, and types console commands into it.
+# Set NO_DUNES=1 and HEADLESS_DIR=<folder> to run without Dunes of Arrakis in a world of its own (vanilla sand test).
 # usage: tools/headless/run.sh <step>...      a step is a console command, or "wait <seconds>"
 #   tools/headless/run.sh "wait 28" "wormtest selftest" "wait 15"
 # Commands run on different threads: put a "wait 1" between two that must run in order.
@@ -9,9 +10,10 @@ set -e
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 game="$APPDATA/Hytale/install/release/package/game/latest"
 java="${JAVA_HOME:-$HOME/.jdks/loom-ea-25-loom+1-11}/bin/java"
-dir="$root/build/headless"
+dir="${HEADLESS_DIR:-$root/build/headless}"
 mkdir -p "$dir/mods"
-cp "$root"/build/libs/IslandCraft-WormsOfArrakis-*.jar "$APPDATA"/Hytale/UserData/Mods/IslandCraft-DunesOfArrakis-*.jar "$dir/mods/"
+cp "$root"/build/libs/IslandCraft-WormsOfArrakis-*.jar "$dir/mods/"
+if [ -z "$NO_DUNES" ]; then cp "$APPDATA"/Hytale/UserData/Mods/IslandCraft-DunesOfArrakis-*.jar "$dir/mods/"; fi
 cd "$dir"
 
 pause() { node -e "setTimeout(() => {}, $1 * 1000)"; }

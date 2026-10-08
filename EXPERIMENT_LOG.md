@@ -266,6 +266,174 @@ Calibrate with the numbers from `/wormtest speed` (see question 3); the derived 
 - No missing-asset warnings: none from this mod in the headless server log; `selftest` reports `assets missing: none`.
 - Each of the five commands runs: registered and listed by `help wormtest` (verified); `selftest` exercises the ripple and worm code (verified); the player-only ones have not been run by a player. **Screenshots: none, no client was available.**
 
+## Prompt 18: aggro and the worm event brain
+
+### What was built
+
+- `AggroManager` (ticked by `WormBrainSystem` once per world tick): reads every player's position and `MovementStatesComponent`, adds or decays aggro, looks for groups every 0.25 s, and runs the events of that world.
+- `WormEvent` (STALKING, LOCKED, BREACH, COOLDOWN, ENDED) knows nothing of the engine; it asks a small `Env` (valid, onSand, position). `WormEvents` holds the live events and the listeners. `GroupFinder` does the grouping. These three are covered by 14 unit tests (`gradlew test`).
+- `/worm status | aggro [player] | add <player> <amount> | trigger [player|self] [stalk] [lock] | stop [player] | ignore <player>`, all working from the console as well (a player name; `self` or no name needs a player).
+- Chat text is in `server.lang` under `wormsOfArrakis.` and `commands.worm.`. Every phase change, retarget and end is written to the server log as `[Worm #n] ...`, and to operators in chat when `DebugChat` is true (an operator is anyone with the permission of the `/worm` command).
+- Config `Worms_of_Arrakis.json` (all keys, with these defaults): `AggroThreshold` 100, `WalkAggroPerBlock` 1, `RunAggroPerBlock` 2, `JumpAggroPerBlock` 2, `StillDecayPerSecond` 1, `GroupRadius` 200, `MinGainSpeed` 0.5, `SandTolerance` 1, `ResetFractionOnTrigger` 1, `FizzleScoreFraction` 0.5, `StalkSeconds` 40, `LockSeconds` 4, `BreachSeconds` 3, `CooldownSeconds` 120, `RetargetKeepsClock` false, `WormStartMinDistance` 120, `WormStartMaxDistance` 180, `DebugChat` false, `SandBlocksOverride` empty. `MinGainSpeed` 0.5 blocks per second was my choice: well under the slowest deliberate movement (walking is about 1.65), above the drift of a standing player.
+
+### The rules as built
+
+- **Aggro**: horizontal blocks since the last tick, times the rate of the first matching source. Gains only if the player is eligible, on sand and moving at `MinGainSpeed` or more. Otherwise `StillDecayPerSecond * dt` comes off, down to 0. Players are never dropped from tracking while above 0. A jump of over 40 blocks per second between two ticks is treated as a teleport and gains nothing.
+- **Built-in sources**, registered through the public registry in this order (first match wins): `jump` (airborne after a jump, until landing), `run` (running or sprinting flag), `walk` (walking flag). **Crouching gains nothing** by design: the brief lists only these three, and sneaking is how to cross sand quietly. If the game's ordinary movement is not the `running` flag this needs a look (see the in-game checks).
+- **On sand**: the first non-empty block at or below the one under the feet, searching down `SandTolerance` extra blocks (three times that while airborne after a jump), is in the sand set. Rock, buildings and an empty drop under the feet are not sand; a block one step down still is. Fluids are not blocks to the engine, so sand under shallow water counts.
+- **Sand set**: `SandBlocksOverride` if not empty; otherwise `Arrakis_Sand` when Dunes of Arrakis is installed, else `Soil_Sand`, `Soil_Sand_Ashen`, `Soil_Sand_Red`, `Soil_Sand_White`. The ripple test uses the same set. Checked headless: with Dunes the log says `Sand block ids in this game: [5775]` (one id); in a world with no Dunes it lists four ids. **The old `SandBlocks` key was renamed**, because the earlier test version had written five names into saved configs, which would have defeated the automatic choice.
+- **Groups**: players taken from the highest score down; each one not yet grouped starts a group of every unassigned player within `GroupRadius` (horizontal) of them. Players already in an event, and ineligible ones (creative, dead, ignored, or not seen this tick), are left out. The trigger is a group total of at least `AggroThreshold`.
+- **Trigger**: members sorted by score, ties to the most recent gainer; the target is the first one on sand; scores are multiplied by `1 - ResetFractionOnTrigger` (0 by default). `/worm trigger` does not reset scores. If nobody is on sand an event is still created, ending FIZZLED at once so the log and hooks see it, and the group total is scaled to `FizzleScoreFraction * threshold`, keeping each player's share.
+- **STALKING**: if the target is not on sand, or is gone (disconnected, dead, left the world, went creative), the first player in the ranking now on sand takes over, the clock restarts (unless `RetargetKeepsClock`), and `onRetarget` fires. Nobody on sand: FIZZLED.
+- **LOCKED**: nothing changes whatever the target stands on. If the target is gone entirely (disconnected or left the world) there is nobody to hunt, so the event ends FIZZLED. A target who simply dies keeps the event going to BREACH, which ends FIZZLED unless the target is valid again.
+- **BREACH**: a 3 s stub; no kill is done here (prompt 20). At its end the event goes to COOLDOWN and `onEnd(DEVOURED)` fires if the target is still valid.
+- **COOLDOWN**: the event stays in the list in this phase for `CooldownSeconds`; its members cannot be in a new event. A FIZZLED or STOPPED event has no cooldown (a fizzled group is meant to stay agitated). `/worm stop` also cuts a cooldown short; `/worm trigger` ends the player's cooldown and starts.
+- **The stand-in worm position**: starts 120 to 180 blocks from the target in a random direction at the target's height, and moves in a straight line so that it arrives exactly as the stalk clock runs out (re-aimed every tick, and after a retarget it heads for the new target). In LOCKED and BREACH it sits under the target. Prompt 19 replaces the path.
+
+### API for other mods (`WormAggro`, `AggroSource`, `AggroContext`)
+
+```java
+WormAggro.registerSource(new AggroSource("mymod_drum", 3.0 /* or a DoubleSupplier */, ctx -> ctx.getStates().crouching));
+WormAggro.unregisterSource("mymod_drum");
+WormAggro.addAggro(playerRef, 25, "mymod_explosion");   // one-off; negative removes; floor 0; shown in /worm aggro
+WormAggro.getAggro(playerUuid);                          // current score
+WormAggro.sources();                                     // registered sources, in order
+```
+
+A source is an id, a rate in aggro per block and a predicate over an `AggroContext` (the player, their `MovementStates`, the distance and speed this tick, and whether they are airborne after a jump). Sources are tried in registration order and the first match is used for that tick; registering an id again replaces the old source. The built-in `jump`, `run` and `walk` are registered the same way, with rates read from the config on every use.
+
+Hooks and queries for prompts 19 and 20:
+
+```java
+WormEvents.get().addListener(new WormEventListener() {   // all default methods, all on the world thread
+    void onPhaseChange(WormEvent e, WormPhase old, WormPhase now)  // old is null for the first phase
+    void onTick(WormEvent e)                                       // every tick of every phase but ENDED
+    void onRetarget(WormEvent e, UUID oldTarget, UUID newTarget)   // STALKING only
+    void onEnd(WormEvent e, WormEndReason reason)                  // DEVOURED, FIZZLED or STOPPED
+});
+event.getPhase(); event.getSecondsLeft(); event.getTarget() /* UUID */; event.getGroup() /* List<UUID> */;
+event.getWormPosition(); event.getId(); event.getWorldName(); event.isForced();
+WormEvents.get().all(); WormEvents.get().eventOf(playerUuid);
+```
+
+Targets and groups are UUIDs, not `PlayerRef`s, because the state machine is engine-free; a `PlayerRef` is `Universe.get().getPlayer(uuid)`.
+
+### Calibration (speeds derived, not measured: confirm with `/wormtest speed 30`)
+
+From `MovementConfig/Default.json`: base speed 5.5; walking flag x0.3 = 1.65 blocks per second; running x1.0 = 5.5; sprinting x1.273 = 7.0; crouching x0.55 = 3.0.
+
+| Lone player, steady | Rate (default) | Aggro per second | Time to 100 |
+| --- | --- | --- | --- |
+| Walking (1.65 b/s) | 1 per block | 1.65 | **61 s** |
+| Running (5.5 b/s) | 2 per block | 11 | **9 s** |
+| Sprinting (7.0 b/s) | 2 per block | 14 | **7 s** |
+| Jumping (about running speed, airborne) | 2 per block | about 11 | about 9 s |
+
+A lone walker takes about a minute, which is fine, but a lone runner or sprinter triggers in under ten seconds: "you took a few steps", not "you have been loud for a while". **Recommended defaults:** `RunAggroPerBlock` 0.5 and `JumpAggroPerBlock` 0.5, walk left at 1. That gives running 2.75 per second (36 s), sprinting 3.5 (29 s), walking 1.65 (61 s), and keeps faster movement louder per second. Standing still removes 1 per second, so a runner who pauses for 30 s loses 30. If the game's ordinary forward movement turns out to carry the `walking` flag rather than `running`, a lone walker would trigger in about 18 s at the default; then lower `WalkAggroPerBlock` to 0.3. The defaults in the code are the brief's; change them in `Worms_of_Arrakis.json` once the speeds are measured.
+
+### Cost of the group calculation
+
+`GroupFinder.find` (the whole grouping, sorting included), measured in a unit test (`GroupFinderTest.cost`, JIT warmed): **20 players: 2.0 microseconds per call; 200 players: 14.6 microseconds**. It runs four times a second per world, so it is negligible. It is O(n squared) distance checks; a spatial hash would only matter beyond a few hundred players in one world. The per-tick player update (a position, a movement-flag read, a few block lookups) costs more than the grouping and is linear in players; it has not been measured with real players.
+
+### Checks done here (no client)
+
+- Clean build and deploy; the server boots with no warning or unknown-key message from this mod; `/worm status`, `stop`, `add`, `trigger` and `help worm` answer from the console (`No worm events.`, `Stopped 0 event(s).`, `No such player: Nobody`, `Name a player; the console has no position.`).
+- 14 unit tests pass: all four phases with the right timings, the worm arriving as the clock ends, target on rock picks the next sand player and restarts the clock (and keeps it when configured), everyone on rock fizzles, a locked target cannot escape, a disconnecting target moves the event on (stalking) or fizzles it (locked), no target fizzles at once, stop cuts events and cooldowns short, grouping by distance, ranking with the tie-break by most recent contributor.
+- Sand set with Dunes absent: checked in a separate headless world (`NO_DUNES=1 HEADLESS_DIR=... tools/headless/run.sh ...`): four vanilla sand ids resolved. With Dunes: one id (`Arrakis_Sand`).
+
+### Checks that need players in game
+
+1. `/worm aggro` after walking 20 s, running 20 s and bunny-hopping on sand: the numbers should match the table (about 33 walking, about 220 running, about the same bunny-hopping). Check which flag ordinary movement has.
+2. Standing still loses 1 per second; walking on rock gains nothing.
+3. Two players: both add to the `/worm status` group total; the higher scorer is the target; a tie goes to the more recent contributor.
+4. Target steps onto rock during STALKING: next sand player chosen, clock restarts; all on rock: FIZZLED and the group is at 50.
+5. Target on rock during LOCKED: nothing changes.
+6. `/worm trigger self 10 4` with `DebugChat` true: STALKING 10 s, LOCKED 4 s, BREACH 3 s, then COOLDOWN, in chat.
+7. Disconnect the target mid-event; cooldown respected for a second threshold trigger, ignored by `/worm trigger`.
+
+### Changes after the first in-game review
+
+- Defaults now: `WalkAggroPerBlock` 0.5, `RunAggroPerBlock` 1 (running and sprinting), `JumpAggroPerBlock` 1. With the derived speeds a lone player needs about 121 s walking (0.83 per second), 18 s running (5.5 per second) and 14 s sprinting (7 per second) to reach 100.
+- Off sand, aggro falls `OffSandDecayMultiplier` (10) times faster than the still-on-sand decay: 10 per second on rock, water or anything not in the sand set, 1 per second standing still on sand.
+- Step ripples (a small ripple round walking players) were tried and removed again for tick smoothness; the config keys and the detection code are gone.
+
+### Anything the game would not allow
+
+- `GameMode` has only `Adventure` and `Creative`; there is no spectator game mode, so only creative (and dead, and ignored) are excluded. A spectator-like state, if there is one, would need a separate component check.
+- Events and targets use UUIDs rather than `PlayerRef`, to keep the rules testable without an engine; `Universe.get().getPlayer(uuid)` gets the ref.
+- I could not simulate players inside the server, so the engine side of aggro (movement flags, the sand check, real speeds) is checked only by the build and the in-game list above; the rules around it are unit tested.
+
+## Prompt 19: what the players see and hear before the worm arrives
+
+**Status: built, loads clean, not yet seen or heard.** No client was available, so none of the feeling has been tuned and there are no screenshots. Every effect has its own `/worm preview` so each can be tuned alone, and every number is in `Worms_of_Arrakis.json`.
+
+### How it is wired
+
+`WormEffects` is a second listener on the prompt 18 hooks (registered after the log). `onTick` runs every world tick for STALKING, LOCKED and BREACH; `onRetarget` and `onEnd` handle fades and clean-up. Per-player state for the target (`TargetFx`) is faded and restored from the brain system once per tick. Nothing is announced in chat; `DebugChat` still prints the phase lines for operators.
+
+### Techniques used, and why
+
+The summary at the top of this log says the weather route replaces the sky, fog and sound tags (a clash with the Coriolis storm, which forces a weather), that the movement-settings slowdown did not slow the player in the test, and that one-shot sounds cannot be stopped. So:
+
+- **Vignette: entity effects**, one per level, swapped as the strength changes: `Arrakis_Worm_Vignette_Level_1` to `_6` (the soft vignette texture at 15% to 90% edge opacity, generated by `tools/assets/build.js`). There is no fade control on one effect, so the fade is the levels stepping up. Not the weather route, so nothing collides with Coriolis.
+- **Slow: entity effects**, `Arrakis_Worm_Slow_95` to `_10` (horizontal speed 95% down to 10% in 5% steps, the same field the vanilla Slow effect uses), swapped to the nearest step to the wanted share as it ramps. `SlowMethod` can be set to `settings` to use the smooth MovementSettings route instead (it also scales walk, run and sprint). **Jump force is always lowered through the settings route** (it is the only way); if the settings route does not work in your game the jump height will not change.
+- **Rumble: one-shot sounds played again every `RumbleIntervalSeconds` (3 s), per player**, with the volume and pitch arguments of `playSoundEvent2dToPlayer`, so there is no distance falloff and no weather tag. The three low layers from the prompt 17 spike are played together: `Arrakis_SFX_Worm_Rumble_Statue_Low`, `_Ice_Low`, `_Storm_Low`.
+- **Ripple: the prompt 17 thin-layer ripple** (`RippleJob`, layers of 1 to 4 px, restored from the world at the end, on disconnect and on shutdown).
+- **Camera shake**: new assets `Arrakis_Worm_Tremble` (faint), `Arrakis_Worm_Lock` (strong) and `Arrakis_Worm_Pass` (bystander pulse), sent with `CameraShakeEffect(index, intensity, AccumulationMode.Set)`.
+- **Wormsign**: `ParticleUtil.spawnParticleEffect(..., scale, color, null, listOfViewerRefs, store, visibleDistance)` with only the players within `WormsignViewDistance` of the worm, so cost scales with viewers, and only over loaded sand.
+
+### What each player gets (all values in the config)
+
+| Who | What |
+| --- | --- |
+| Anyone within `WormsignViewDistance` (220) of the worm | A dust trail along the path every `WormsignTrailInterval` (0.25 s), made of `Block_Break_Dust` and `Block_Land_Hard_Dust` along the stretch the worm covered, and a puff (`Block_Break_Sand` and a higher `Block_Break_Dust`) every `WormsignPuffInterval` (1.5 s). Not shown while the worm is over rock or buildings. |
+| Everyone within `GroupRadius` (200) of the target | The rumble at `RumbleBystanderVolume` (0.7), flat, pitch 1. |
+| The target | The rumble from `RumbleTargetStartVolume` (0.3) to `RumbleTargetVolume` (1.0) over STALKING, pitch down to `RumbleTargetEndPitch` (0.85), full in LOCKED. |
+| The target and anyone within `RippleViewDistance` (30) | In the last `RippleSeconds` (15) of STALKING a ring-by-ring ripple of radius `RippleRadius` (5), every 4 s speeding to every 1 s; in LOCKED a tight radius-2 ripple every `LockedRippleInterval` (0.2 s). |
+| The target | Vignette over the last `VignetteSeconds` (15) up to `VignetteStalkLevel` (0.5), to full by the end of LOCKED, held through the 3 s stub breach, then fading out. `VignetteStrength` scales it (0 turns it off). |
+| The target | Camera shake: tremble from `ShakeSeconds` (15) out, every 2 s growing to every 0.5 s and from 0.2 to 0.6 intensity; strong `Lock` pulses every 0.4 s in LOCKED. `CameraShake` false turns it off; `ShakeStrength` scales it. |
+| A bystander the worm passes within `BystanderShakeRange` (30) of | One `Pass` shake pulse (at most once every 10 s). |
+| The target | From the start of LOCKED, slowed from 100% to `SlowFloor` (15%) of normal speed by the end of the lock, and jump force to `SlowJumpFloor` (50%). |
+
+### The worm path
+
+`WormEvent` now follows the ground: the stand-in position goes along a straight leg from the start to the target, with progress = (time / stalk time) raised to `PathEaseExponent` (2): slow at first, faster as it nears, arriving exactly as the clock runs out. Its height is the surface height of the column it is over (when that chunk is loaded). The start is a random point `WormStartMinDistance` to `WormStartMaxDistance` (120 to 180) away, trying up to 16 directions for one whose top block is sand (if the column is not loaded it cannot be checked and is accepted). **Rock on the way: the worm passes under it.** Routing around would need a path over blocks that are mostly not loaded 100 blocks out; the straight line is simple, always arrives on time, and the trail is simply not drawn over rock or buildings, so a worm crossing a rock outcrop disappears and comes out the other side. Whether that reads better than a detour has not been seen.
+
+On a retarget the leg restarts from where the worm is, towards the new target, with the clock restarted (or kept, per `RetargetKeepsClock`), so the path bends.
+
+### Always restored
+
+- **Fake blocks**: each ripple restores the real blocks as it ends; the job is also ended and restored when its owner disconnects and when the plugin shuts down.
+- **Vignette and slow**: `TargetFx.restore` removes the effects and resets the movement settings. It runs when an event ends (after a fade of `FadeOutSeconds`, 1 s), at once for `/worm stop`, when the plugin shuts down, and when the target dies. On disconnect or world change the entity is gone and the game drops the effects and resets movement on entry to the next world.
+- **Sounds**: there is no stop-sound packet, so a sound already playing cannot be cut. Stopping means no more are played; the last one fades by itself within the length of the longest file (about 6.6 s at normal pitch, longer at a lower pitch). `/worm stop` silences nothing earlier than that.
+
+### Retargeting
+
+`onRetarget` fades the old target's vignette and slowdown out over `FadeOutSeconds`, resets the rumble timer so the new target hears it at once, and the new target's effects are computed from the event clock, so they start at the stage that matches it (the clock restarts, so they start at the beginning of STALKING's curve, unless `RetargetKeepsClock` is true).
+
+### `/worm preview <wormsign|rumble|ripple|vignette|slow|shake|off> [seconds]`
+
+Runs one effect for the caller only, ramping from nothing to full over the seconds (default 10), using the same code: wormsign draws a worm approaching from 120 blocks ahead (over any ground); rumble plays the target's volume and pitch ramp; ripple speeds up as it would; vignette and slow ramp 0 to 1; shake is the tremble then the lock pulses. `off` stops it and fades the effect.
+
+### Checked here
+
+- Builds and loads with no warning; every new asset validates (`/wormtest selftest`: 18 slow effects, 6 vignette effects, 3 shakes, the textures; `assets missing: none`).
+- 14 unit tests pass, including the changed worm path code (the worm still arrives as the clock ends).
+- Not checked, because they need players: everything in the table above and the clean-up cases.
+
+### In-game checks (from the brief)
+
+1. `/worm preview` each effect and tune the numbers in `Worms_of_Arrakis.json`.
+2. `/worm trigger self 40 4` from open sand, then the same with a second player 80 blocks away (wormsign and the 70% rumble only), then a target who steps onto rock (ripples and vignette stop within about a second, speed normal; another sand player becomes the target), then disconnect and death mid-event, then two far-apart groups.
+3. Screenshots at 30 s, 10 s, 4 s and 1 s before the end, target and bystander views, into `Screenshots/`.
+4. The numbers to report: how far the wormsign is visible, the particle cost with several viewers (it spawns about three to eight particle systems per 0.25 s per event, sent to the viewers in range), and which sounds carry the feeling.
+
+### Things the game would not allow
+
+- A single entity effect has no strength control, so the vignette fade is built from six levels and the slowdown from eighteen steps rather than one smooth ramp.
+- No stop-sound packet: sounds cannot be silenced, only not repeated (above).
+- Jump height can only be changed through the movement-settings route, which did not slow the player in the earlier test, so the jump reduction may not work even if the speed reduction does.
+
 ## Cleanup after prompt 20
 
 Remove or hide `WormTestCommand`, `Positional`, `WormSelfTest`, `WormTestSystem`, the job classes and the `Arrakis_Worm_*` test weathers, effects and sound events that the real worm does not use. Keep `Worms_of_Arrakis.json` (`SandBlocks`) and the placeholder model until the real one exists.

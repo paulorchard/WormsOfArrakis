@@ -114,3 +114,58 @@ fs.writeFileSync(path.join(modelDir, 'Arrakis_Worm_Placeholder.json'), JSON.stri
   Texture: 'NPC/Worms_of_Arrakis/Arrakis_Worm_Placeholder.png',
 }, null, 2) + '\n');
 console.log('worm placeholder written');
+
+// ---- Prompt 19 assets: camera shakes, vignette levels and slow steps (all driven from code, one asset per level).
+const shakeDir = path.join(root, 'Server/Camera/CameraShake/Worms_of_Arrakis');
+fs.mkdirSync(shakeDir, { recursive: true });
+const shakeSide = (d, ein, eout, s) => ({
+  Duration: d, EaseIn: { Time: ein, Type: 'Linear' }, EaseOut: { Time: eout, Type: 'QuadInOut' },
+  Offset: { X: [], Y: [], Z: [] },
+  Rotation: {
+    Pitch: [{ Frequency: s.f, Amplitude: s.p, Type: 'Sin' }, { Frequency: s.f * 1.6, Amplitude: s.p / 2, Type: 'Cos' }],
+    Yaw: [],
+    Roll: [{ Frequency: s.f * 1.3, Amplitude: s.r, Type: 'Sin' }, { Frequency: s.f * 1.9, Amplitude: s.r / 2, Type: 'Cos' }],
+  },
+});
+const shakes = {
+  Arrakis_Worm_Tremble: { d: 0.8, ein: 0.25, eout: 0.4, s: { f: 3, p: 0.25, r: 0.3 } },   // faint, repeating
+  Arrakis_Worm_Lock: { d: 0.5, ein: 0.05, eout: 0.25, s: { f: 11, p: 0.7, r: 0.9 } },     // strong, in LOCKED
+  Arrakis_Worm_Pass: { d: 0.9, ein: 0.1, eout: 0.6, s: { f: 6, p: 0.5, r: 0.6 } },        // bystander pulse
+};
+for (const [name, v] of Object.entries(shakes)) {
+  const first = shakeSide(v.d, v.ein, v.eout, v.s);
+  const third = shakeSide(v.d, v.ein, v.eout, { f: v.s.f, p: v.s.p * 0.6, r: v.s.r * 0.6 });
+  fs.writeFileSync(path.join(shakeDir, name + '.json'), JSON.stringify({ FirstPerson: first, ThirdPerson: third }, null, 2) + '\n');
+}
+
+// Vignette levels 1..6: the soft vignette with the edge alpha at 15% .. 90%, each with its own entity effect.
+const effDir = path.join(root, 'Server/Entity/Effects/Worms_of_Arrakis');
+const vigTexDir = path.join(root, 'Common/ScreenEffects/Worms_of_Arrakis');
+const vigPng = (maxAlpha) => {
+  const raw = Buffer.alloc((W * 4 + 1) * H);
+  for (let y = 0; y < H; y++) {
+    raw[y * (W * 4 + 1)] = 0;
+    for (let x = 0; x < W; x++) {
+      const dx = (x + 0.5) / W * 2 - 1, dy = (y + 0.5) / H * 2 - 1;
+      const d = Math.sqrt(dx * dx + dy * dy) / Math.SQRT2;
+      const o = y * (W * 4 + 1) + 1 + x * 4;
+      raw[o] = 0x3a; raw[o + 1] = 0x24; raw[o + 2] = 0x10; raw[o + 3] = Math.round(255 * maxAlpha * smooth(0.3, 0.95, d));
+    }
+  }
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+};
+for (let level = 1; level <= 6; level++) {
+  const name = `Arrakis_Worm_Vignette_Level_${level}`;
+  fs.writeFileSync(path.join(vigTexDir, name + '.png'), vigPng(0.15 * level));
+  fs.writeFileSync(path.join(effDir, name + '.json'), JSON.stringify({
+    Duration: 2, ApplicationEffects: { ScreenEffect: `ScreenEffects/Worms_of_Arrakis/${name}.png` },
+  }, null, 2) + '\n');
+}
+
+// Slow steps: horizontal speed 95% down to 10% in 5% steps. The code picks the nearest to what it wants.
+for (let pct = 95; pct >= 10; pct -= 5) {
+  fs.writeFileSync(path.join(effDir, `Arrakis_Worm_Slow_${pct}.json`), JSON.stringify({
+    Duration: 2, ApplicationEffects: { HorizontalSpeedMultiplier: pct / 100 },
+  }, null, 2) + '\n');
+}
+console.log('prompt 19 assets written');

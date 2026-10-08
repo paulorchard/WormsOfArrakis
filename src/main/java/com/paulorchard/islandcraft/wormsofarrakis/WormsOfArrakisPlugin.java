@@ -15,6 +15,10 @@ import java.util.logging.Level;
 
 public class WormsOfArrakisPlugin extends JavaPlugin {
 
+    /** The vanilla sand blocks (Server/Item/Items/Soil/Sand), used when Dunes of Arrakis is not installed. */
+    static final String[] VANILLA_SAND = {"Soil_Sand", "Soil_Sand_Ashen", "Soil_Sand_Red", "Soil_Sand_White"};
+    static final String DUNES_SAND = "Arrakis_Sand";
+
     private static WormsOfArrakisPlugin instance;
 
     // Must be created before setup(); the server loads it from disk in between.
@@ -22,6 +26,9 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
             withConfig(WormsOfArrakisConfig.FILE_NAME, WormsOfArrakisConfig.CODEC);
 
     private final WormTestSystem testSystem = new WormTestSystem();
+    private final AggroManager aggro = new AggroManager(config::get, this::sandBlockIds);
+    private final WormEffects effects = new WormEffects(() -> config.get(), this::sandBlockIds, testSystem);
+    private WormCommand wormCommand;
 
     public WormsOfArrakisPlugin(JavaPluginInit init) {
         super(init);
@@ -32,32 +39,55 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
         return instance;
     }
 
+    AggroManager aggro() {
+        return aggro;
+    }
+
     @Override
     protected void setup() {
         writeConfig();
         getEntityStoreRegistry().registerSystem(testSystem);
+        getEntityStoreRegistry().registerSystem(new WormBrainSystem(aggro, effects));
         getCommandRegistry().registerCommand(new WormTestCommand(testSystem, this::sandBlockIds));
-        // A client that is gone needs no restoring, but the job must not keep running for it.
-        getEventRegistry().registerGlobal(PlayerDisconnectEvent.class,
-                event -> testSystem.dropFor(event.getPlayerRef().getUuid()));
+        wormCommand = new WormCommand(aggro, config::get, effects, testSystem);
+        getCommandRegistry().registerCommand(wormCommand);
+        WormEvents.get().addListener(new WormEventLog(aggro, config::get, () -> wormCommand.getPermission()));
+        WormEvents.get().addListener(effects);
+        getEventRegistry().registerGlobal(PlayerDisconnectEvent.class, event -> {
+            // A client that is gone needs no restoring, but a test job must not keep running for it.
+            testSystem.dropFor(event.getPlayerRef().getUuid());
+            aggro.forget(event.getPlayerRef().getUuid());
+            effects.forget(event.getPlayerRef().getUuid());
+        });
     }
 
-    /** Assets are loaded by now, so say which of the configured sand blocks exist. */
+    /** Assets are loaded by now, so say which sand blocks this game has. */
     @Override
     protected void start() {
         getLogger().at(Level.INFO).log("Sand block ids in this game: %s", Arrays.toString(sandBlockIds().toArray()));
     }
 
-    /** Restores every fake block, movement setting, weather override and test entity before the plugin goes. */
+    /** Restores every test effect and ends every worm event before the plugin goes. */
     @Override
     protected void shutdown() {
+        effects.restoreAll();
         testSystem.abortAll();
+        WormEvents.get().stop(null);
     }
 
-    /** Numeric ids of the configured sand blocks that exist in this game. Read on use, so assets are loaded. */
+    /**
+     * Numeric ids of the blocks that count as sand. A non-empty SandBlocks config is used as written; otherwise
+     * Arrakis_Sand when Dunes of Arrakis is installed, else the vanilla sand blocks. Ids that do not exist are
+     * ignored. Read on use, so assets are loaded.
+     */
     Set<Integer> sandBlockIds() {
+        String[] names = config.get().getSandBlocks();
+        if (names == null || names.length == 0) {
+            boolean dunes = BlockType.getAssetMap().getIndex(DUNES_SAND) != Integer.MIN_VALUE;
+            names = dunes ? new String[] {DUNES_SAND} : VANILLA_SAND;
+        }
         Set<Integer> ids = new HashSet<>();
-        for (String name : config.get().getSandBlocks()) {
+        for (String name : names) {
             int index = BlockType.getAssetMap().getIndex(name);
             if (index != Integer.MIN_VALUE) {
                 ids.add(index);

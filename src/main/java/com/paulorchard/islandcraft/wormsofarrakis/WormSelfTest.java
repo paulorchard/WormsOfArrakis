@@ -96,6 +96,21 @@ final class WormSelfTest extends AbstractWorldCommand {
                 missing.add("particle " + id);
             }
         }
+        for (int pct = 95; pct >= 10; pct -= 5) {
+            if (EntityEffect.getAssetMap().getAsset("Arrakis_Worm_Slow_" + pct) == null) {
+                missing.add("effect Arrakis_Worm_Slow_" + pct);
+            }
+        }
+        for (int level = 1; level <= 6; level++) {
+            if (EntityEffect.getAssetMap().getAsset("Arrakis_Worm_Vignette_Level_" + level) == null) {
+                missing.add("effect Arrakis_Worm_Vignette_Level_" + level);
+            }
+        }
+        for (String id : List.of("Arrakis_Worm_Tremble", "Arrakis_Worm_Lock", "Arrakis_Worm_Pass")) {
+            if (com.hypixel.hytale.builtin.adventure.camera.asset.camerashake.CameraShake.getAssetMap().getIndex(id) == Integer.MIN_VALUE) {
+                missing.add("camera shake " + id);
+            }
+        }
         if (ModelAsset.getAssetMap().getAsset(WormJob.MODEL_ID) == null) {
             missing.add("model " + WormJob.MODEL_ID);
         }
@@ -129,7 +144,7 @@ final class WormSelfTest extends AbstractWorldCommand {
         say(context, "using sand at " + spot);
 
         RippleJob ripple = RippleJob.create(world, java.util.UUID.randomUUID(), new ArrayList<>(),
-                new double[] {spot.x, spot.y, spot.z}, 5, sand.get(), WormTestCommand.layerBlockIds(), new ArrayList<>());
+                new double[] {spot.x, spot.y, spot.z}, 5, sand.get(), WormTestCommand.layerBlockIds(), RippleJob.DURATION, new ArrayList<>());
         int ticks = 0;
         while (ripple.tick(1 / 30f, store) && ticks < 1000) {
             ticks++;
@@ -139,7 +154,7 @@ final class WormSelfTest extends AbstractWorldCommand {
         for (int radius : new int[] {5, 20, 40}) {
             long t0 = System.nanoTime();
             RippleJob big = RippleJob.create(world, java.util.UUID.randomUUID(), new ArrayList<>(),
-                    new double[] {spot.x, spot.y, spot.z}, radius, sand.get(), WormTestCommand.layerBlockIds(), new ArrayList<>());
+                    new double[] {spot.x, spot.y, spot.z}, radius, sand.get(), WormTestCommand.layerBlockIds(), RippleJob.DURATION, new ArrayList<>());
             long built = System.nanoTime() - t0;
             int n = 0;
             t0 = System.nanoTime();

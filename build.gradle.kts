@@ -18,6 +18,7 @@ repositories {
 
 dependencies {
     compileOnly("com.hypixel.hytale:Server:$hytaleServerVersion")
+    testImplementation("com.hypixel.hytale:Server:$hytaleServerVersion")
 
     testImplementation(platform("org.junit:junit-bom:5.10.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")

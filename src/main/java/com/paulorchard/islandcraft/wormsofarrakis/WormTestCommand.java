@@ -99,7 +99,7 @@ public class WormTestCommand extends AbstractCommandCollection {
         }
         Set<Integer> sandIds = sand.get();
         RippleJob job = RippleJob.create(world, player.getUuid(), viewers, new double[] {p.x, p.y, p.z}, radius,
-                sandIds, layerBlockIds(), avoid);
+                sandIds, layerBlockIds(), RippleJob.DURATION, avoid);
         if (job.cellCount() == 0) {
             say(context, "ripple: no sand columns found within " + radius + " blocks (sand ids " + sandIds + ")");
             return;
