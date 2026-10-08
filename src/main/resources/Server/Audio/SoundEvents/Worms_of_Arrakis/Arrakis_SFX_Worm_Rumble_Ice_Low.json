@@ -1,0 +1,21 @@
+{
+  "AudioCategory": "AudioCat_SFX",
+  "Layers": [
+    {
+      "Files": [
+        "Sounds/Environments/Zone3/Global/Cave/Emitters/Z3_Emit_Ice_Rumble_01.ogg",
+        "Sounds/Environments/Zone3/Global/Cave/Emitters/Z3_Emit_Ice_Rumble_02.ogg",
+        "Sounds/Environments/Zone3/Global/Cave/Emitters/Z3_Emit_Ice_Rumble_03.ogg"
+      ],
+      "RandomSettings": {
+        "MinPitch": -12,
+        "MaxPitch": 0
+      },
+      "Volume": 0
+    }
+  ],
+  "PreventSoundInterruption": false,
+  "Volume": 0,
+  "MaxDistance": 96,
+  "StartAttenuationDistance": 24
+}

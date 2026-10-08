@@ -1,0 +1,23 @@
+{
+  "Group": "IslandCraft",
+  "Name": "IslandCraft - Worms of Arrakis",
+  "Version": "0.1.0",
+  "Description": "Sandworms stalk the dunes. Walk loud and something answers.",
+  "Authors": [
+    {
+      "Name": "paulo"
+    }
+  ],
+  "ServerVersion": "*",
+  "Main": "com.paulorchard.islandcraft.wormsofarrakis.WormsOfArrakisPlugin",
+  "Dependencies": {
+    "Hytale:Weather": "*",
+    "Hytale:EntityModule": "*",
+    "Hytale:Camera": "*"
+  },
+  "OptionalDependencies": {
+    "IslandCraft:IslandCraft - Dunes of Arrakis": "*"
+  },
+  "DisabledByDefault": false,
+  "IncludesAssetPack": true
+}

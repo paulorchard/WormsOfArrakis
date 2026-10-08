@@ -1,0 +1,19 @@
+{
+  "AudioCategory": "AudioCat_SFX",
+  "Layers": [
+    {
+      "Files": [
+        "Sounds/Effects/Memory/Memories_Statue_Rumble.ogg"
+      ],
+      "RandomSettings": {
+        "MinPitch": 0,
+        "MaxPitch": 0
+      },
+      "Volume": 0
+    }
+  ],
+  "PreventSoundInterruption": false,
+  "Volume": 0,
+  "MaxDistance": 96,
+  "StartAttenuationDistance": 24
+}

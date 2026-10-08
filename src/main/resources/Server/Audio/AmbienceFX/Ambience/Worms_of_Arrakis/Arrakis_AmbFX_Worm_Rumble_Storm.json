@@ -1,0 +1,17 @@
+{
+  "AudioCategory": "AudioCat_Ambient",
+  "Conditions": {
+    "Shelter": [
+      "Open",
+      "Partial"
+    ],
+    "WeatherTagPattern": {
+      "Op": "Equals",
+      "Tag": "Worm_Rumble"
+    }
+  },
+  "AmbientBed": {
+    "Track": "Sounds/Environments/Global/Weather/Sandstorm_Stereo_LOOP.ogg",
+    "Volume": -6
+  }
+}
