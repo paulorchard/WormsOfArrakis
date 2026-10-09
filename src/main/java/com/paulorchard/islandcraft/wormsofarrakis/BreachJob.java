@@ -4,8 +4,6 @@ import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Rotation3f;
-import com.hypixel.hytale.protocol.GameMode;
-import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.InventoryComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
@@ -64,8 +62,13 @@ final class BreachJob implements WormTestSystem.Job {
     private boolean secondBurst;
     private boolean wormGone;
     private final boolean[] settle = new boolean[3];
-    /** The body of the worm as drawn: where it is and how far it leans, so anyone inside it can be found. */
-    private final WormVolume volume = new WormVolume();
+    /** Everyone caught in the swallow zone, and the camera of everyone near. */
+    private final BreachHold hold = new BreachHold();
+    private final BreachCamera camera = new BreachCamera();
+    private boolean captured;
+    private boolean hidden;
+    private boolean killedHeld;
+    private boolean zoomReleased;
     /** Everyone the worm has already killed, so nobody is killed twice. */
     private final Set<UUID> killed = new HashSet<>();
 
@@ -141,9 +144,7 @@ final class BreachJob implements WormTestSystem.Job {
             }
         }
         moveWorm(store, cfg, t);
-        if (cfg.isBreachVolumeKills()) {
-            killInside(store, cfg);
-        }
+        swallowZone(store, cfg, t, dt);
         if (cfg.isBreachLiftsVictim() && victimHere && t >= cfg.getBreachLiftAt() && t < cfg.getBreachSwallowAt()) {
             lift(store, cfg, t);
         }
@@ -172,6 +173,8 @@ final class BreachJob implements WormTestSystem.Job {
     @Override
     public void abort(Store<EntityStore> store) {
         removeWorm(store);
+        hold.releaseAll(world, store);
+        camera.resetAll();
     }
 
     // ------------------------------------------------------------------ the beats
@@ -320,7 +323,6 @@ final class BreachJob implements WormTestSystem.Job {
         rotation.setYaw(yaw());
         rotation.setPitch((float) tilt);
         tc.setRotation(rotation);
-        volume.set(tc.getPosition(), heading.x, heading.z, tilt, wormHeight, wormRadius);
     }
 
     /** Moves the target up with the worm, a little inward, a position at a time. */
@@ -341,37 +343,63 @@ final class BreachJob implements WormTestSystem.Job {
                 Teleport.createForPlayer(world, to, new Rotation3f(head.getRotation())));
     }
 
-    /** The swallow: its sounds and shake, and the kill if the volume has not already done it. */
+    /** The swallow: its sounds and shake; the kill itself is done by {@link #swallowZone} later (or here with BreachHold off). */
     private void swallow(Store<EntityStore> store, WormsOfArrakisConfig cfg) {
         sounds(store, cfg, "swallow", 1.0f);
         shakeNear(store, cfg, "Arrakis_Worm_Lock", 1.2);
+        if (cfg.isBreachHold()) {
+            return; // the kill comes at BreachKillAt, once the worm is under the sand
+        }
         if (victim == null || victimRef == null || !victimRef.isValid() || killed.contains(victim.getUuid())) {
             return;
         }
         devour(store, cfg, victimRef, victim.getUuid());
     }
 
-    /** Anyone whose body is inside the worm dies at once, once. Runs every tick while the worm exists. */
-    private void killInside(Store<EntityStore> store, WormsOfArrakisConfig cfg) {
-        if (worm == null || !worm.isValid()) {
+    /**
+     * The swallow zone and the camera zone, on the breach clock. Everyone within wormRadius times
+     * BreachSwallowZoneFactor when the worm appears is held, hidden at BreachHideAt and killed at BreachKillAt (the
+     * worm is back under the sand); everyone within BreachCameraRadius gets the pulled-out camera until
+     * BreachCameraReturnAt. Membership of the swallow zone is decided once, when the worm appears.
+     */
+    private void swallowZone(Store<EntityStore> store, WormsOfArrakisConfig cfg, double t, double dt) {
+        double hideAt = cfg.getBreachHideAt() < 0 ? cfg.getBreachSwallowAt() : cfg.getBreachHideAt();
+        double killAt = cfg.getBreachKillAt() < 0 ? cfg.getBreachDiveEnd() : cfg.getBreachKillAt();
+        double returnAt = cfg.getBreachCameraReturnAt() < 0 ? cfg.getBreachDiveEnd() + 1.0 : cfg.getBreachCameraReturnAt();
+        double cameraRadius = cfg.getBreachCameraRadius() > 0 ? cfg.getBreachCameraRadius() : wormRadius * 4 + 20;
+        UUID target = victim == null ? null : victim.getUuid();
+        camera.tick(world, store, cfg, dt, centre, heading, wormHeight, cameraRadius, target, t < returnAt);
+        if (!zoomReleased && t >= returnAt) {
+            zoomReleased = true;
+            if (target != null) {
+                fx.releaseZoom(target);
+            }
+        }
+        if (!cfg.isBreachHold()) {
             return;
         }
-        double reach = wormHeight * 2 + wormRadius + 2;
-        for (PlayerRef p : WormEffects.near(world, store, centre, reach, null)) {
-            Ref<EntityStore> ref = p.getReference();
-            if (ref == null || !ref.isValid() || killed.contains(p.getUuid())) {
-                continue;
-            }
-            Player player = store.getComponent(ref, Player.getComponentType());
-            if (player != null && player.getGameMode() == GameMode.Creative) {
-                continue;
-            }
-            Vector3d at = WormEffects.position(store, p);
-            if (at != null && volume.touches(at.x, at.y, at.z, 1.8)) {
-                devour(store, cfg, ref, p.getUuid());
-            }
+        if (!captured && t >= cfg.getBreachWormAt()) {
+            captured = true;
+            hold.capture(world, store, centre, wormRadius * cfg.getBreachSwallowZoneFactor(), victim);
+        }
+        if (!captured || killedHeld) {
+            return;
+        }
+        hold.tick(world, store);
+        if (!hidden && t >= hideAt) {
+            hidden = true;
+            hold.hide(world, store);
+        }
+        if (t >= killAt) {
+            killedHeld = true;
+            hold.finish(world, store, cfg.isDevourKills(), (s, ref, id) -> {
+                if (!killed.contains(id)) {
+                    devour(s, cfg, ref, id);
+                }
+            });
         }
     }
+
 
     /** What the worm does to someone it has caught: killed with nothing dropped, or (DevourKills off) badly hurt. */
     private void devour(Store<EntityStore> store, WormsOfArrakisConfig cfg, Ref<EntityStore> ref, UUID id) {

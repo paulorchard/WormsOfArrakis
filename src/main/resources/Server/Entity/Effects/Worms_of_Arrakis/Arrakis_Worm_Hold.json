@@ -1,0 +1,17 @@
+{
+  "Duration": 12,
+  "ApplicationEffects": {
+    "MovementEffects": {
+      "DisableAll": true
+    },
+    "AbilityEffects": {
+      "Disabled": [
+        "Primary",
+        "Secondary",
+        "Ability1",
+        "Ability3"
+      ]
+    },
+    "KnockbackMultiplier": 0
+  }
+}

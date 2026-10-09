@@ -117,6 +117,14 @@ final class WormSelfTest extends AbstractWorldCommand {
         if (com.hypixel.hytale.builtin.adventure.camera.asset.camerashake.CameraShake.getAssetMap().getIndex(SinkJob.SHAKE_ID) == Integer.MIN_VALUE) {
             missing.add("camera shake " + SinkJob.SHAKE_ID);
         }
+        for (String id : List.of(BreachHold.HOLD, BreachHold.HIDE)) {
+            if (EntityEffect.getAssetMap().getAsset(id) == null) {
+                missing.add("effect " + id);
+            }
+        }
+        if (ModelAsset.getAssetMap().getAsset("Arrakis_Worm_Invisible") == null) {
+            missing.add("model Arrakis_Worm_Invisible");
+        }
         if (WormDevourDamage.cause() == null) {
             missing.add("damage cause " + WormDevourDamage.CAUSE_ID);
         }

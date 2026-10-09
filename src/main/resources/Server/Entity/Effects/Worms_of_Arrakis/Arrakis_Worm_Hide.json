@@ -1,0 +1,10 @@
+{
+  "Duration": 12,
+  "ModelOverride": {
+    "Model": "NPC/Worms_of_Arrakis/Arrakis_Worm_Invisible.blockymodel",
+    "Texture": "NPC/Worms_of_Arrakis/Arrakis_Worm_Invisible.png"
+  },
+  "ApplicationEffects": {
+    "KnockbackMultiplier": 0
+  }
+}

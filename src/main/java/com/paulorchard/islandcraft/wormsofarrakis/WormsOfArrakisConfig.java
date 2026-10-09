@@ -345,10 +345,50 @@ public class WormsOfArrakisConfig {
                             config -> config.zoomFromDistance)
                     .documentation("Camera distance in blocks the zoom starts from (the usual third person distance).")
                     .add()
-                    .append(new KeyedCodec<>("ZoomDistance", Codec.DOUBLE, false),
-                            (config, value) -> config.zoomDistance = value,
-                            config -> config.zoomDistance)
-                    .documentation("Camera distance in blocks at the end of the zoom: about three times the usual third person distance.")
+                    .append(new KeyedCodec<>("BreachHold", Codec.BOOLEAN, false),
+                            (config, value) -> config.breachHold = value,
+                            config -> config.breachHold)
+                    .documentation("Everyone in the swallow zone is held, hidden at BreachHideAt and killed at BreachKillAt. False turns the hold and the hide off: the swallow then kills the target at BreachSwallowAt and nobody else dies.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachSwallowZoneFactor", Codec.DOUBLE, false),
+                            (config, value) -> config.breachSwallowZoneFactor = value,
+                            config -> config.breachSwallowZoneFactor)
+                    .documentation("The swallow zone is this times the worm radius, measured from the breach centre, decided when the worm appears.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachCameraRadius", Codec.DOUBLE, false),
+                            (config, value) -> config.breachCameraRadius = value,
+                            config -> config.breachCameraRadius)
+                    .documentation("Blocks. Everyone this close to the breach gets the pulled-out camera. 0 means worm radius times 4 plus 20.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachHideAt", Codec.DOUBLE, false),
+                            (config, value) -> config.breachHideAt = value,
+                            config -> config.breachHideAt)
+                    .documentation("Seconds into BREACH when held players turn invisible. -1 means BreachSwallowAt.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachKillAt", Codec.DOUBLE, false),
+                            (config, value) -> config.breachKillAt = value,
+                            config -> config.breachKillAt)
+                    .documentation("Seconds into BREACH when held players are killed, once the worm is under the sand. -1 means BreachDiveEnd.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachCameraReturnAt", Codec.DOUBLE, false),
+                            (config, value) -> config.breachCameraReturnAt = value,
+                            config -> config.breachCameraReturnAt)
+                    .documentation("Seconds into BREACH when the pulled-out camera eases back. -1 means BreachDiveEnd plus 1.")
+                    .add()
+                    .append(new KeyedCodec<>("ZoomWormHeightFactor", Codec.DOUBLE, false),
+                            (config, value) -> config.zoomWormHeightFactor = value,
+                            config -> config.zoomWormHeightFactor)
+                    .documentation("The pulled-out camera distance is this times the worm height (10 blocks times BreachWormSize), up to ZoomMaxDistance.")
+                    .add()
+                    .append(new KeyedCodec<>("ZoomMaxDistance", Codec.DOUBLE, false),
+                            (config, value) -> config.zoomMaxDistance = value,
+                            config -> config.zoomMaxDistance)
+                    .documentation("Blocks. The longest the pulled-out camera distance can be.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachCameraMode", Codec.STRING, false),
+                            (config, value) -> config.breachCameraMode = value,
+                            config -> config.breachCameraMode)
+                    .documentation("distance: pull the player camera back. fixed: a camera placed on the player side of the worm, aimed at it.")
                     .add()
                     .append(new KeyedCodec<>("WormStartCandidates", Codec.DOUBLE, false),
                             (config, value) -> config.wormStartCandidates = value,
@@ -384,11 +424,6 @@ public class WormsOfArrakisConfig {
                             (config, value) -> config.breachLiftsVictim = value,
                             config -> config.breachLiftsVictim)
                     .documentation("Lift the victim up with the worm before the swallow (the old behaviour). Off by default.")
-                    .add()
-                    .append(new KeyedCodec<>("BreachVolumeKills", Codec.BOOLEAN, false),
-                            (config, value) -> config.breachVolumeKills = value,
-                            config -> config.breachVolumeKills)
-                    .documentation("Anyone inside the worm body while it is up dies at once (DevourKills still decides death or heavy damage).")
                     .add()
                     .append(new KeyedCodec<>("RippleShake", Codec.BOOLEAN, false),
                             (config, value) -> config.rippleShake = value,
@@ -525,7 +560,15 @@ public class WormsOfArrakisConfig {
     private boolean cameraZoom = true;
     private double zoomSeconds = 2;
     private double zoomFromDistance = 5;
-    private double zoomDistance = 15;
+    private boolean breachHold = true;
+    private double breachSwallowZoneFactor = 1.15;
+    private double breachCameraRadius = 0;
+    private double breachHideAt = -1;
+    private double breachKillAt = -1;
+    private double breachCameraReturnAt = -1;
+    private double zoomWormHeightFactor = 0.6667;
+    private double zoomMaxDistance = 60;
+    private String breachCameraMode = "distance";
     private double wormStartCandidates = 48;
     private double wormStartOpenRadius = 4;
     private double wormStartHeightTolerance = 2;
@@ -533,7 +576,6 @@ public class WormsOfArrakisConfig {
     private double startRippleDelay = 1;
     private double breachRippleMaxRings = 8;
     private boolean breachLiftsVictim = false;
-    private boolean breachVolumeKills = true;
     private boolean rippleShake = true;
     private double rippleShakeStrength = 0.5;
     private double sinkIncrement = 2;
@@ -628,6 +670,10 @@ public class WormsOfArrakisConfig {
     public boolean isDebugChat() {
         return debugChat;
     }
+
+
+
+
 
 
 
@@ -825,8 +871,40 @@ public class WormsOfArrakisConfig {
         return zoomFromDistance;
     }
 
-    public double getZoomDistance() {
-        return zoomDistance;
+    public boolean isBreachHold() {
+        return breachHold;
+    }
+
+    public double getBreachSwallowZoneFactor() {
+        return breachSwallowZoneFactor;
+    }
+
+    public double getBreachCameraRadius() {
+        return breachCameraRadius;
+    }
+
+    public double getBreachHideAt() {
+        return breachHideAt;
+    }
+
+    public double getBreachKillAt() {
+        return breachKillAt;
+    }
+
+    public double getBreachCameraReturnAt() {
+        return breachCameraReturnAt;
+    }
+
+    public double getZoomWormHeightFactor() {
+        return zoomWormHeightFactor;
+    }
+
+    public double getZoomMaxDistance() {
+        return zoomMaxDistance;
+    }
+
+    public String getBreachCameraMode() {
+        return breachCameraMode;
     }
 
     public double getWormStartCandidates() {
@@ -855,10 +933,6 @@ public class WormsOfArrakisConfig {
 
     public boolean isBreachLiftsVictim() {
         return breachLiftsVictim;
-    }
-
-    public boolean isBreachVolumeKills() {
-        return breachVolumeKills;
     }
 
     public boolean isRippleShake() {

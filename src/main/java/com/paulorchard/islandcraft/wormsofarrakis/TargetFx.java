@@ -172,7 +172,7 @@ final class TargetFx {
             return;
         }
         double q = zoomCur * zoomCur * (3 - 2 * zoomCur);
-        double distance = cfg.getZoomFromDistance() + (cfg.getZoomDistance() - cfg.getZoomFromDistance()) * q;
+        double distance = cfg.getZoomFromDistance() + (BreachCamera.distance(cfg) - cfg.getZoomFromDistance()) * q;
         if (Math.abs(distance - zoomSent) < 0.05 || zoomClock < 0.05) {
             return;
         }

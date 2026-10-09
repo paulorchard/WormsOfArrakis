@@ -58,6 +58,8 @@ final class WormEffects implements WormEventListener {
     private final WormTestSystem jobs;
     private final Map<Integer, State> states = new ConcurrentHashMap<>();
     private final Map<UUID, TargetFx> fx = new ConcurrentHashMap<>();
+    /** Targets whose pulled-out camera the breach has let go (BreachCameraReturnAt): TargetFx eases them back. */
+    private final Set<UUID> zoomReleased = ConcurrentHashMap.newKeySet();
     private volatile double dt = 1.0 / 30;
 
     WormEffects(Supplier<WormsOfArrakisConfig> config, Supplier<Set<Integer>> sand, WormTestSystem jobs) {
@@ -68,6 +70,14 @@ final class WormEffects implements WormEventListener {
 
     void setDt(double dt) {
         this.dt = dt;
+    }
+
+    void releaseZoom(UUID target) {
+        zoomReleased.add(target);
+    }
+
+    void clearZoomRelease(UUID target) {
+        zoomReleased.remove(target);
     }
 
     TargetFx fxOf(PlayerRef player) {
@@ -150,6 +160,7 @@ final class WormEffects implements WormEventListener {
         Vector3d heading = len < 1e-6 ? new Vector3d(0, 0, 1) : new Vector3d(dir.x / len, 0, dir.z / len);
         Vector3d centre = new Vector3d(p.x, surfaceY(world, p.x, p.z, p.y), p.z);
         jobs.stop(caller.getUuid(), "breach");
+        zoomReleased.remove(caller.getUuid());
         jobs.add(new BreachJob(this, world, caller.getUuid(), victim, victim == null ? null : ref, centre, heading,
                 seconds, config));
     }
@@ -397,7 +408,7 @@ final class WormEffects implements WormEventListener {
             double zs = Math.min(cfg.getZoomSeconds(), Math.max(lock, 0.001));
             zoom = left <= zs ? clamp01(1 - left / zs) : 0;
         } else if (phase == WormPhase.BREACH) {
-            zoom = 1;
+            zoom = zoomReleased.contains(target.getUuid()) ? 0 : 1;
         }
         targetFx.wantZoom(zoom);
 
