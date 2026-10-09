@@ -46,6 +46,7 @@ public class WormCommand extends AbstractCommandCollection {
                 "lockSeconds"));
         addSubCommand(WorldPositional.build("preview", LANG + "preview.desc", this::preview, "effect", "seconds"));
         addSubCommand(WorldPositional.build("breach", LANG + "breach.desc", this::breach, "target"));
+        addSubCommand(WorldPositional.build("sink", LANG + "sink.desc", this::sink, "wait", "depth", "delay"));
         addSubCommand(WorldPositional.build("stop", LANG + "stop.desc", this::stop, "player"));
         addSubCommand(WorldPositional.build("ignore", LANG + "ignore.desc", this::ignore, "player"));
     }
@@ -246,6 +247,24 @@ public class WormCommand extends AbstractCommandCollection {
             return;
         }
         trigger(context, world, store, new String[] {who, "0.05", "0.05"});
+    }
+
+    /** /worm sink [wait] [depth] [delay]: the pull under the sand, on you alone, to watch. */
+    private void sink(CommandContext context, World world, Store<EntityStore> store, String[] args) {
+        PlayerRef self = caller(context, store);
+        if (self == null) {
+            say(context, "needPlayer");
+            return;
+        }
+        WormsOfArrakisConfig cfg = config.get();
+        double wait = args.length > 0 ? parse(args[0], 0) : cfg.getZoomSeconds() + 1.0;
+        double depth = args.length > 1 ? parse(args[1], cfg.getBreachSinkDepth()) : cfg.getBreachSinkDepth();
+        // By default the same wait at the bottom as in the breach: from the end of the sink to BreachDiveEnd + BreachKillDelay.
+        double breachDelay = Math.max(0, cfg.getBreachDiveEnd() + cfg.getBreachKillDelay() - (cfg.getBreachSinkAt() + cfg.getBreachSinkSeconds()));
+        double delay = args.length > 2 ? parse(args[2], breachDelay) : breachDelay;
+        jobs.stop(self.getUuid(), "sinktest");
+        jobs.add(new SinkTestJob(world, self, config, depth, Math.max(0, wait), Math.max(0, delay)));
+        say(context, "sink.start", "wait", num(wait), "depth", num(depth), "delay", num(delay));
     }
 
     private static double parse(String text, double fallback) {

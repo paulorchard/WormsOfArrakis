@@ -66,8 +66,11 @@ final class BreachJob implements WormTestSystem.Job {
     private final BreachHold hold = new BreachHold();
     private final BreachCamera camera = new BreachCamera();
     private boolean captured;
-    private boolean hidden;
-    private boolean killedHeld;
+    private boolean sinking;
+    private boolean bottomBurst;
+    private boolean zoneDone;
+    /** Seconds into the breach when the sunk players start coming back up (DevourKills off); -1 until then. */
+    private double returnStart = -1;
     private boolean zoomReleased;
     /** Everyone the worm has already killed, so nobody is killed twice. */
     private final Set<UUID> killed = new HashSet<>();
@@ -358,13 +361,15 @@ final class BreachJob implements WormTestSystem.Job {
 
     /**
      * The swallow zone and the camera zone, on the breach clock. Everyone within wormRadius times
-     * BreachSwallowZoneFactor when the worm appears is held, hidden at BreachHideAt and killed at BreachKillAt (the
-     * worm is back under the sand); everyone within BreachCameraRadius gets the pulled-out camera until
-     * BreachCameraReturnAt. Membership of the swallow zone is decided once, when the worm appears.
+     * BreachSwallowZoneFactor when the worm appears is held (decided once, then), pulled BreachSinkDepth blocks down into
+     * the sand from BreachSinkAt for BreachSinkSeconds, and killed at the bottom (BreachKillAt, which defaults to the end
+     * of the sink); everyone within BreachCameraRadius gets the pulled-out camera until BreachCameraReturnAt.
      */
     private void swallowZone(Store<EntityStore> store, WormsOfArrakisConfig cfg, double t, double dt) {
-        double hideAt = cfg.getBreachHideAt() < 0 ? cfg.getBreachSwallowAt() : cfg.getBreachHideAt();
-        double killAt = cfg.getBreachKillAt() < 0 ? cfg.getBreachDiveEnd() : cfg.getBreachKillAt();
+        double sinkAt = cfg.getBreachSinkAt();
+        double sinkSeconds = Math.max(0.05, cfg.getBreachSinkSeconds());
+        double killAt = cfg.getBreachKillAt() < 0
+                ? Math.max(sinkAt + sinkSeconds, cfg.getBreachDiveEnd() + cfg.getBreachKillDelay()) : cfg.getBreachKillAt();
         double returnAt = cfg.getBreachCameraReturnAt() < 0 ? cfg.getBreachDiveEnd() + 1.0 : cfg.getBreachCameraReturnAt();
         double cameraRadius = cfg.getBreachCameraRadius() > 0 ? cfg.getBreachCameraRadius() : wormRadius * 4 + 20;
         UUID target = victim == null ? null : victim.getUuid();
@@ -382,70 +387,74 @@ final class BreachJob implements WormTestSystem.Job {
             captured = true;
             hold.capture(world, store, centre, wormRadius * cfg.getBreachSwallowZoneFactor(), victim);
         }
-        if (!captured || killedHeld) {
+        if (!captured || zoneDone) {
             return;
         }
         hold.tick(world, store);
-        if (!hidden && t >= hideAt) {
-            hidden = true;
-            hold.hide(world, store);
+        double depth = cfg.getBreachSinkDepth();
+        BreachHold.Devour devourOne = (s, ref, id) -> {
+            if (!killed.contains(id)) {
+                devour(s, cfg, ref, id);
+            }
+        };
+        if (!sinking && t >= sinkAt && t < killAt) {
+            sinking = true;
+            startSink(store, cfg);
         }
-        if (t >= killAt) {
-            killedHeld = true;
-            hold.finish(world, store, cfg.isDevourKills(), (s, ref, id) -> {
-                if (!killed.contains(id)) {
-                    devour(s, cfg, ref, id);
-                }
-            });
-        }
-    }
-
-
-    /** What the worm does to someone it has caught: killed with nothing dropped, or (DevourKills off) badly hurt. */
-    private void devour(Store<EntityStore> store, WormsOfArrakisConfig cfg, Ref<EntityStore> ref, UUID id) {
-        killed.add(id);
-        try {
-            DamageCause cause = WormDevourDamage.cause();
-            if (cause == null) {
-                WormsOfArrakisPlugin.get().getLogger().at(Level.SEVERE).log("%s", "Damage cause "
-                        + WormDevourDamage.CAUSE_ID + " is not loaded, so the worm cannot hurt anyone");
+        if (sinking && returnStart < 0) {
+            double q = Math.min(1, (t - sinkAt) / sinkSeconds);
+            hold.sinkTo(world, store, depth, q);
+            if (!bottomBurst && q >= 1) {
+                bottomBurst = true;
+                sinkBursts(store, cfg, false);
+            }
+        } else if (sinking) {
+            // DevourKills off: the same curve backwards, back to where they stood.
+            double q = 1 - (t - returnStart) / sinkSeconds;
+            if (q <= 0) {
+                zoneDone = true;
+                hold.releaseAndHurt(world, store, devourOne);
                 return;
             }
+            hold.sinkTo(world, store, depth, q);
+        }
+        if (returnStart < 0 && t >= killAt) {
             if (cfg.isDevourKills()) {
-                if (!cfg.isDevourDropsItems()) {
-                    clearInventory(store, ref);
-                }
-                DamageSystems.executeDamage(ref, store, new Damage(WormDevourDamage.SOURCE, cause, 1.0e6f));
+                zoneDone = true;
+                hold.kill(world, store, devourOne);
+            } else if (sinking) {
+                returnStart = t;
             } else {
-                EntityStatMap stats = store.getComponent(ref, EntityStatMap.getComponentType());
-                EntityStatValue health = stats == null ? null : stats.get(DefaultEntityStatTypes.getHealth());
-                if (health != null) {
-                    float hp = health.get();
-                    float amount = (float) Math.max(0, Math.min(hp * cfg.getDevourHurtFraction(), hp - 1));
-                    DamageSystems.executeDamage(ref, store, new Damage(WormDevourDamage.SOURCE, cause, amount));
-                }
+                zoneDone = true;
+                hold.releaseAndHurt(world, store, devourOne);
             }
-        } catch (Throwable t) {
-            WormsOfArrakisPlugin.get().getLogger().at(Level.WARNING).withCause(t).log("The worm could not hurt someone it caught");
         }
     }
 
-    /** Empties every inventory section so that nothing is dropped and the respawn is bare. */
-    private void clearInventory(Store<EntityStore> store, Ref<EntityStore> ref) {
-        clear(store, ref, InventoryComponent.Hotbar.getComponentType());
-        clear(store, ref, InventoryComponent.Storage.getComponentType());
-        clear(store, ref, InventoryComponent.Armor.getComponentType());
-        clear(store, ref, InventoryComponent.Utility.getComponentType());
-        clear(store, ref, InventoryComponent.Tool.getComponentType());
-        clear(store, ref, InventoryComponent.Backpack.getComponentType());
+    /** The sink begins: the dust and the shake, and the camera of everyone sinking is fixed where it is. */
+    private void startSink(Store<EntityStore> store, WormsOfArrakisConfig cfg) {
+        hold.startSink(store);
+        sinkBursts(store, cfg, true);
+        for (PlayerRef p : hold.sunkPlayersNow()) {
+            Vector3d surface = hold.surfaceOf(p);
+            if (surface != null) {
+                camera.pin(world, store, cfg, p, surface, centre, heading, wormHeight);
+            }
+            if (cfg.isCameraShake()) {
+                WormEffects.shake(p, "Arrakis_Worm_Lock", cfg.getShakeStrength());
+            }
+        }
     }
 
-    private void clear(Store<EntityStore> store, Ref<EntityStore> ref,
-                       com.hypixel.hytale.component.ComponentType<EntityStore, ? extends InventoryComponent> type) {
-        InventoryComponent section = store.getComponent(ref, type);
-        if (section != null) {
-            section.getInventory().clear();
-        }
+    /** A ring of dust where each player goes under; at the bottom, sand falls in after them. */
+    private void sinkBursts(Store<EntityStore> store, WormsOfArrakisConfig cfg, boolean start) {
+        hold.bursts(store, cfg, WormEffects.refs(hearers(store, cfg)), start);
+    }
+
+    /** What the worm does to someone it has caught: see {@link WormDevour}. */
+    private void devour(Store<EntityStore> store, WormsOfArrakisConfig cfg, Ref<EntityStore> ref, UUID id) {
+        killed.add(id);
+        WormDevour.apply(store, cfg, ref);
     }
 
     /** A second, lower burst of dust as the worm goes under. */

@@ -39,6 +39,8 @@ final class BreachCamera {
         double clock = 1;
         double sent = -1;
         boolean on;
+        /** Fixed in place (the player is sinking): nothing follows them down. */
+        boolean pinned;
 
         Member(PlayerRef player) {
             this.player = player;
@@ -95,6 +97,14 @@ final class BreachCamera {
                 continue;
             }
             m.clock += dt;
+            if (m.pinned) {
+                if (!active) {
+                    reset(m);
+                    members.remove(m.player.getUuid());
+                    done.add(m.player.getUuid());
+                }
+                continue;
+            }
             if (fixed) {
                 if (active && !m.on) {
                     sendFixed(world, store, m, centre, heading, wormHeight, far);
@@ -149,9 +159,43 @@ final class BreachCamera {
             int ground = chunk.getHeight((int) Math.floor(cx) & ChunkUtil.SIZE_MASK, (int) Math.floor(cz) & ChunkUtil.SIZE_MASK);
             cy = Math.max(cy, ground + 3.0);
         }
-        double tx = centre.x;
-        double ty = centre.y + wormHeight * 0.5;
-        double tz = centre.z;
+        sendAt(m, cx, cy, cz, centre.x, centre.y + wormHeight * 0.5, centre.z);
+    }
+
+    /**
+     * Fixes the camera of a player who is about to sink where it is now (behind their eye along the way they look, at
+     * the distance it had, kept above the ground), aimed at the spot where they stand, so it does not follow them down.
+     */
+    void pin(World world, Store<EntityStore> store, WormsOfArrakisConfig cfg, PlayerRef player, Vector3d lookAt,
+             Vector3d centre, Vector3d heading, double wormHeight) {
+        Member m = members.get(player.getUuid());
+        if (m == null) {
+            m = new Member(player);
+            members.put(player.getUuid(), m);
+        }
+        m.pinned = true;
+        Ref<EntityStore> ref = player.getReference();
+        com.hypixel.hytale.server.core.modules.entity.component.HeadRotation head = ref == null ? null
+                : store.getComponent(ref, com.hypixel.hytale.server.core.modules.entity.component.HeadRotation.getComponentType());
+        Vector3d at = WormEffects.position(store, player);
+        if (head == null || at == null) {
+            sendFixed(world, store, m, centre, heading, wormHeight, distance(cfg));
+            return;
+        }
+        double d = m.sent > 0 ? m.sent : distance(cfg);
+        Vector3d dir = head.getDirection();
+        double cx = at.x - dir.x * d;
+        double cy = at.y + 1.6 - dir.y * d;
+        double cz = at.z - dir.z * d;
+        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(cx, cz));
+        if (chunk != null) {
+            int ground = chunk.getHeight((int) Math.floor(cx) & ChunkUtil.SIZE_MASK, (int) Math.floor(cz) & ChunkUtil.SIZE_MASK);
+            cy = Math.max(cy, ground + 2.0);
+        }
+        sendAt(m, cx, cy, cz, lookAt.x, lookAt.y + 1.0, lookAt.z);
+    }
+
+    private void sendAt(Member m, double cx, double cy, double cz, double tx, double ty, double tz) {
         double horizontal = Math.hypot(tx - cx, tz - cz);
         ServerCameraSettings settings = new ServerCameraSettings();
         settings.isFirstPerson = false;

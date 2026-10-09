@@ -348,7 +348,7 @@ public class WormsOfArrakisConfig {
                     .append(new KeyedCodec<>("BreachHold", Codec.BOOLEAN, false),
                             (config, value) -> config.breachHold = value,
                             config -> config.breachHold)
-                    .documentation("Everyone in the swallow zone is held, hidden at BreachHideAt and killed at BreachKillAt. False turns the hold and the hide off: the swallow then kills the target at BreachSwallowAt and nobody else dies.")
+                    .documentation("Everyone in the swallow zone is held, pulled down into the sand and killed at the bottom. False turns the hold and the sink off: the swallow then kills the target at BreachSwallowAt and nobody else dies.")
                     .add()
                     .append(new KeyedCodec<>("BreachSwallowZoneFactor", Codec.DOUBLE, false),
                             (config, value) -> config.breachSwallowZoneFactor = value,
@@ -360,15 +360,30 @@ public class WormsOfArrakisConfig {
                             config -> config.breachCameraRadius)
                     .documentation("Blocks. Everyone this close to the breach gets the pulled-out camera. 0 means worm radius times 4 plus 20.")
                     .add()
-                    .append(new KeyedCodec<>("BreachHideAt", Codec.DOUBLE, false),
-                            (config, value) -> config.breachHideAt = value,
-                            config -> config.breachHideAt)
-                    .documentation("Seconds into BREACH when held players turn invisible. -1 means BreachSwallowAt.")
-                    .add()
                     .append(new KeyedCodec<>("BreachKillAt", Codec.DOUBLE, false),
                             (config, value) -> config.breachKillAt = value,
                             config -> config.breachKillAt)
-                    .documentation("Seconds into BREACH when held players are killed, once the worm is under the sand. -1 means BreachDiveEnd.")
+                    .documentation("Seconds into BREACH when held players are killed. -1 means BreachDiveEnd plus BreachKillDelay (never before the sink has ended); any other value overrides both.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachSinkAt", Codec.DOUBLE, false),
+                            (config, value) -> config.breachSinkAt = value,
+                            config -> config.breachSinkAt)
+                    .documentation("Seconds into BREACH when held players start to be pulled down into the sand.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachSinkSeconds", Codec.DOUBLE, false),
+                            (config, value) -> config.breachSinkSeconds = value,
+                            config -> config.breachSinkSeconds)
+                    .documentation("Seconds the pull down takes; it ends at the bottom, where they are killed.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachSinkDepth", Codec.DOUBLE, false),
+                            (config, value) -> config.breachSinkDepth = value,
+                            config -> config.breachSinkDepth)
+                    .documentation("Blocks the held players are pulled down (a fixed number for now, it does not scale with the worm).")
+                    .add()
+                    .append(new KeyedCodec<>("BreachKillDelay", Codec.DOUBLE, false),
+                            (config, value) -> config.breachKillDelay = value,
+                            config -> config.breachKillDelay)
+                    .documentation("Seconds after the worm has gone back under the sand (BreachDiveEnd) that held players are killed, or released with DevourKills off. Ignored if BreachKillAt is set.")
                     .add()
                     .append(new KeyedCodec<>("BreachCameraReturnAt", Codec.DOUBLE, false),
                             (config, value) -> config.breachCameraReturnAt = value,
@@ -563,8 +578,11 @@ public class WormsOfArrakisConfig {
     private boolean breachHold = true;
     private double breachSwallowZoneFactor = 1.15;
     private double breachCameraRadius = 0;
-    private double breachHideAt = -1;
     private double breachKillAt = -1;
+    private double breachSinkAt = 1.9;
+    private double breachSinkSeconds = 0.5;
+    private double breachSinkDepth = 3;
+    private double breachKillDelay = 0.5;
     private double breachCameraReturnAt = -1;
     private double zoomWormHeightFactor = 0.6667;
     private double zoomMaxDistance = 60;
@@ -670,6 +688,11 @@ public class WormsOfArrakisConfig {
     public boolean isDebugChat() {
         return debugChat;
     }
+
+
+
+
+
 
 
 
@@ -883,12 +906,24 @@ public class WormsOfArrakisConfig {
         return breachCameraRadius;
     }
 
-    public double getBreachHideAt() {
-        return breachHideAt;
-    }
-
     public double getBreachKillAt() {
         return breachKillAt;
+    }
+
+    public double getBreachSinkAt() {
+        return breachSinkAt;
+    }
+
+    public double getBreachSinkSeconds() {
+        return breachSinkSeconds;
+    }
+
+    public double getBreachSinkDepth() {
+        return breachSinkDepth;
+    }
+
+    public double getBreachKillDelay() {
+        return breachKillDelay;
     }
 
     public double getBreachCameraReturnAt() {

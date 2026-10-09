@@ -65,6 +65,14 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(wormCommand);
         WormEvents.get().addListener(new WormEventLog(aggro, config::get, () -> wormCommand.getPermission()));
         WormEvents.get().addListener(effects);
+        // Someone who leaves the world while pulled under the sand is saved where they stood on the surface.
+        getEventRegistry().registerGlobal(com.hypixel.hytale.server.core.event.events.player.DrainPlayerFromWorldEvent.class, event -> {
+            com.hypixel.hytale.server.core.universe.PlayerRef who = event.getHolder().getComponent(com.hypixel.hytale.server.core.universe.PlayerRef.getComponentType());
+            com.hypixel.hytale.math.vector.Transform surface = who == null ? null : BreachHold.surfaceTransform(who.getUuid());
+            if (surface != null) {
+                event.setTransform(surface);
+            }
+        });
         getEventRegistry().registerGlobal(PlayerDisconnectEvent.class, event -> {
             // A client that is gone needs no restoring, but a test job must not keep running for it.
             testSystem.dropFor(event.getPlayerRef().getUuid());
