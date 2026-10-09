@@ -4,7 +4,8 @@ import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.RemoveReason;
 import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.vector.Rotation3f;
-import com.hypixel.hytale.protocol.ChangeVelocityType;
+import com.hypixel.hytale.protocol.GameMode;
+import com.hypixel.hytale.server.core.entity.entities.Player;
 import com.hypixel.hytale.server.core.inventory.InventoryComponent;
 import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
@@ -15,14 +16,14 @@ import com.hypixel.hytale.server.core.modules.entity.teleport.Teleport;
 import com.hypixel.hytale.server.core.modules.entitystats.EntityStatMap;
 import com.hypixel.hytale.server.core.modules.entitystats.EntityStatValue;
 import com.hypixel.hytale.server.core.modules.entitystats.asset.DefaultEntityStatTypes;
-import com.hypixel.hytale.server.core.modules.physics.component.Velocity;
-import com.hypixel.hytale.server.core.modules.splitvelocity.VelocityConfig;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import org.joml.Vector3d;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
@@ -58,12 +59,15 @@ final class BreachJob implements WormTestSystem.Job {
     private Vector3d liftFrom;
     private boolean booms;
     private boolean wormSpawned;
-    private boolean knocked;
     private boolean swallowed;
     private boolean dived;
     private boolean secondBurst;
     private boolean wormGone;
     private final boolean[] settle = new boolean[3];
+    /** The body of the worm as drawn: where it is and how far it leans, so anyone inside it can be found. */
+    private final WormVolume volume = new WormVolume();
+    /** Everyone the worm has already killed, so nobody is killed twice. */
+    private final Set<UUID> killed = new HashSet<>();
 
     /** {@code victim} is null for /worm breach here. {@code centre} is on the surface under the victim. */
     BreachJob(WormEffects fx, World world, UUID owner, PlayerRef victim, Ref<EntityStore> victimRef, Vector3d centre,
@@ -128,10 +132,6 @@ final class BreachJob implements WormTestSystem.Job {
             wormSpawned = true;
             spawnWorm(store);
         }
-        if (!knocked && t >= cfg.getBreachWormAt()) {
-            knocked = true;
-            knockBystanders(store, cfg);
-        }
         // Dust wall, surface ring and thrown chunks while the worm is up and diving.
         if (t >= cfg.getBreachWormAt() && t < cfg.getBreachDiveEnd()) {
             burstClock += dt;
@@ -141,7 +141,10 @@ final class BreachJob implements WormTestSystem.Job {
             }
         }
         moveWorm(store, cfg, t);
-        if (victimHere && t >= cfg.getBreachLiftAt() && t < cfg.getBreachSwallowAt()) {
+        if (cfg.isBreachVolumeKills()) {
+            killInside(store, cfg);
+        }
+        if (cfg.isBreachLiftsVictim() && victimHere && t >= cfg.getBreachLiftAt() && t < cfg.getBreachSwallowAt()) {
             lift(store, cfg, t);
         }
         if (!swallowed && t >= cfg.getBreachSwallowAt()) {
@@ -191,9 +194,9 @@ final class BreachJob implements WormTestSystem.Job {
             WormEffects.particle(store, "Block_Land_Hard_Dust", x, centre.y + 0.4, z, dust * 0.8f, far, refs);
         }
         WormEffects.particle(store, "Block_Break_Dirt", centre.x, centre.y + 0.5, centre.z, dust, far, refs);
-        // The heave: a wide, fast ripple of fake blocks, shown to everyone near.
-        fx.ripple(world, store, victim, owner, centre, (int) Math.round(Math.max(cfg.getBreachRippleRadius(), wormRadius * 1.6)), 0.6f,
-                cfg.getBreachShakeRange(), cfg);
+        // The heave: the sink-and-rebound ripple, as wide as the worm, shown to everyone near.
+        int rings = (int) Math.min(cfg.getBreachRippleMaxRings(), Math.ceil(wormRadius));
+        fx.sink(world, store, owner, centre, 4, rings, false, cfg.getBreachShakeRange(), victim);
         sounds(store, cfg, "boom", 1.0f);
         shakeNear(store, cfg, "Arrakis_Worm_Lock", 1.0);
     }
@@ -214,11 +217,7 @@ final class BreachJob implements WormTestSystem.Job {
             boolean near = at != null && at.distance(centre) <= cfg.getBreachShakeRange();
             float volume = (float) (near ? cfg.getBreachBoomVolume() : cfg.getBreachFarVolume()) * factor;
             switch (which) {
-                case "boom" -> {
-                    TimedEffectsJob.sound(p, "SFX_Sand_Break", volume, 0.5f);
-                    TimedEffectsJob.sound(p, "Arrakis_SFX_Worm_Rumble_Statue_Low", volume, 0.6f);
-                    TimedEffectsJob.sound(p, "Arrakis_SFX_Worm_Rumble_Storm_Low", volume, 0.7f);
-                }
+                case "boom" -> boomSounds(p, volume);
                 case "swallow" -> {
                     TimedEffectsJob.sound(p, "SFX_Sand_Break", volume, 0.35f);
                     TimedEffectsJob.sound(p, "Arrakis_SFX_Worm_Rumble_Ice_Low", volume, 0.5f);
@@ -235,6 +234,13 @@ final class BreachJob implements WormTestSystem.Job {
         }
     }
 
+    /** The boom: also used where an event starts. */
+    static void boomSounds(PlayerRef p, float volume) {
+        TimedEffectsJob.sound(p, "SFX_Sand_Break", volume, 0.5f);
+        TimedEffectsJob.sound(p, "Arrakis_SFX_Worm_Rumble_Statue_Low", volume, 0.6f);
+        TimedEffectsJob.sound(p, "Arrakis_SFX_Worm_Rumble_Storm_Low", volume, 0.7f);
+    }
+
     private void spawnWorm(Store<EntityStore> store) {
         Rotation3f rotation = new Rotation3f(0, yaw(), 0);
         worm = WormJob.spawnProp(store, new Vector3d(centre.x, centre.y - wormHeight, centre.z), rotation, scale, false);
@@ -242,39 +248,6 @@ final class BreachJob implements WormTestSystem.Job {
 
     private float yaw() {
         return (float) Math.atan2(-heading.x, -heading.z);
-    }
-
-    /** Bystanders within the knockback radius of the target are thrown back, unharmed. */
-    private void knockBystanders(Store<EntityStore> store, WormsOfArrakisConfig cfg) {
-        for (PlayerRef p : WormEffects.near(world, store, centre, Math.max(cfg.getKnockbackRadius(), wormRadius), null)) {
-            if (victim != null && p.getUuid().equals(victim.getUuid())) {
-                continue;
-            }
-            throwAway(store, p.getReference(), cfg.getKnockbackForce());
-        }
-    }
-
-    private void throwAway(Store<EntityStore> store, Ref<EntityStore> ref, double force) {
-        if (ref == null || !ref.isValid()) {
-            return;
-        }
-        TransformComponent tc = store.getComponent(ref, TransformComponent.getComponentType());
-        Velocity velocity = store.getComponent(ref, Velocity.getComponentType());
-        if (tc == null || velocity == null) {
-            return;
-        }
-        Vector3d p = tc.getPosition();
-        double dx = p.x - centre.x;
-        double dz = p.z - centre.z;
-        double len = Math.hypot(dx, dz);
-        if (len < 1e-3) {
-            double a = ThreadLocalRandom.current().nextDouble(0, Math.PI * 2);
-            dx = Math.cos(a);
-            dz = Math.sin(a);
-            len = 1;
-        }
-        velocity.addInstruction(new Vector3d(dx / len * force, force * 0.45, dz / len * force), new VelocityConfig(),
-                ChangeVelocityType.Set);
     }
 
     /** The tall wall of dust round the worm, a ring on the surface, and chunks of sand thrown out and up. */
@@ -347,6 +320,7 @@ final class BreachJob implements WormTestSystem.Job {
         rotation.setYaw(yaw());
         rotation.setPitch((float) tilt);
         tc.setRotation(rotation);
+        volume.set(tc.getPosition(), heading.x, heading.z, tilt, wormHeight, wormRadius);
     }
 
     /** Moves the target up with the worm, a little inward, a position at a time. */
@@ -367,13 +341,41 @@ final class BreachJob implements WormTestSystem.Job {
                 Teleport.createForPlayer(world, to, new Rotation3f(head.getRotation())));
     }
 
-    /** The target is swallowed: killed with nothing dropped, or (DevourKills off) thrown and badly hurt. */
+    /** The swallow: its sounds and shake, and the kill if the volume has not already done it. */
     private void swallow(Store<EntityStore> store, WormsOfArrakisConfig cfg) {
         sounds(store, cfg, "swallow", 1.0f);
         shakeNear(store, cfg, "Arrakis_Worm_Lock", 1.2);
-        if (victim == null || victimRef == null || !victimRef.isValid()) {
+        if (victim == null || victimRef == null || !victimRef.isValid() || killed.contains(victim.getUuid())) {
             return;
         }
+        devour(store, cfg, victimRef, victim.getUuid());
+    }
+
+    /** Anyone whose body is inside the worm dies at once, once. Runs every tick while the worm exists. */
+    private void killInside(Store<EntityStore> store, WormsOfArrakisConfig cfg) {
+        if (worm == null || !worm.isValid()) {
+            return;
+        }
+        double reach = wormHeight * 2 + wormRadius + 2;
+        for (PlayerRef p : WormEffects.near(world, store, centre, reach, null)) {
+            Ref<EntityStore> ref = p.getReference();
+            if (ref == null || !ref.isValid() || killed.contains(p.getUuid())) {
+                continue;
+            }
+            Player player = store.getComponent(ref, Player.getComponentType());
+            if (player != null && player.getGameMode() == GameMode.Creative) {
+                continue;
+            }
+            Vector3d at = WormEffects.position(store, p);
+            if (at != null && volume.touches(at.x, at.y, at.z, 1.8)) {
+                devour(store, cfg, ref, p.getUuid());
+            }
+        }
+    }
+
+    /** What the worm does to someone it has caught: killed with nothing dropped, or (DevourKills off) badly hurt. */
+    private void devour(Store<EntityStore> store, WormsOfArrakisConfig cfg, Ref<EntityStore> ref, UUID id) {
+        killed.add(id);
         try {
             DamageCause cause = WormDevourDamage.cause();
             if (cause == null) {
@@ -383,36 +385,36 @@ final class BreachJob implements WormTestSystem.Job {
             }
             if (cfg.isDevourKills()) {
                 if (!cfg.isDevourDropsItems()) {
-                    clearInventory(store);
+                    clearInventory(store, ref);
                 }
-                DamageSystems.executeDamage(victimRef, store, new Damage(WormDevourDamage.SOURCE, cause, 1.0e6f));
+                DamageSystems.executeDamage(ref, store, new Damage(WormDevourDamage.SOURCE, cause, 1.0e6f));
             } else {
-                EntityStatMap stats = store.getComponent(victimRef, EntityStatMap.getComponentType());
+                EntityStatMap stats = store.getComponent(ref, EntityStatMap.getComponentType());
                 EntityStatValue health = stats == null ? null : stats.get(DefaultEntityStatTypes.getHealth());
                 if (health != null) {
                     float hp = health.get();
                     float amount = (float) Math.max(0, Math.min(hp * cfg.getDevourHurtFraction(), hp - 1));
-                    DamageSystems.executeDamage(victimRef, store, new Damage(WormDevourDamage.SOURCE, cause, amount));
+                    DamageSystems.executeDamage(ref, store, new Damage(WormDevourDamage.SOURCE, cause, amount));
                 }
-                throwAway(store, victimRef, cfg.getKnockbackForce() * 1.5);
             }
         } catch (Throwable t) {
-            WormsOfArrakisPlugin.get().getLogger().at(Level.WARNING).withCause(t).log("The breach could not hurt its target");
+            WormsOfArrakisPlugin.get().getLogger().at(Level.WARNING).withCause(t).log("The worm could not hurt someone it caught");
         }
     }
 
     /** Empties every inventory section so that nothing is dropped and the respawn is bare. */
-    private void clearInventory(Store<EntityStore> store) {
-        clear(store, InventoryComponent.Hotbar.getComponentType());
-        clear(store, InventoryComponent.Storage.getComponentType());
-        clear(store, InventoryComponent.Armor.getComponentType());
-        clear(store, InventoryComponent.Utility.getComponentType());
-        clear(store, InventoryComponent.Tool.getComponentType());
-        clear(store, InventoryComponent.Backpack.getComponentType());
+    private void clearInventory(Store<EntityStore> store, Ref<EntityStore> ref) {
+        clear(store, ref, InventoryComponent.Hotbar.getComponentType());
+        clear(store, ref, InventoryComponent.Storage.getComponentType());
+        clear(store, ref, InventoryComponent.Armor.getComponentType());
+        clear(store, ref, InventoryComponent.Utility.getComponentType());
+        clear(store, ref, InventoryComponent.Tool.getComponentType());
+        clear(store, ref, InventoryComponent.Backpack.getComponentType());
     }
 
-    private void clear(Store<EntityStore> store, com.hypixel.hytale.component.ComponentType<EntityStore, ? extends InventoryComponent> type) {
-        InventoryComponent section = store.getComponent(victimRef, type);
+    private void clear(Store<EntityStore> store, Ref<EntityStore> ref,
+                       com.hypixel.hytale.component.ComponentType<EntityStore, ? extends InventoryComponent> type) {
+        InventoryComponent section = store.getComponent(ref, type);
         if (section != null) {
             section.getInventory().clear();
         }

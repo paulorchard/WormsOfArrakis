@@ -62,7 +62,7 @@ const box = (id, name, y) => ({
   },
 });
 const model = { nodes: [box('1', 'Lower', -160), box('2', 'Upper', 160)], lod: 'auto' };
-fs.writeFileSync(path.join(npcDir, 'Arrakis_Worm_Placeholder.blockymodel'), JSON.stringify(model, null, 2) + '\n');
+// The model (round body, mouth hole) is written by tools/assets/wormmodel.js, which must run after this script: it also adds the black hole and lip areas to the png written below.
 // Sandstone texture for the worm: the vanilla Rock_Sandstone_Side tile repeated over a 256x704 sheet.
 const sandstone = process.argv[3];
 if (!sandstone) { console.error('usage: node build.js <Zone2 weather dir> <Rock_Sandstone_Side.png>'); process.exit(1); }

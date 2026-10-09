@@ -303,19 +303,11 @@ public final class AggroManager {
         Vector3d start = new Vector3d();
         if (target != null) {
             Vector3d tp = players.get(target).position;
-            ThreadLocalRandom random = ThreadLocalRandom.current();
-            double min = cfg.getWormStartMinDistance();
             World world = Universe.get().getWorld(worldName);
-            // A random direction whose start is on sand; if that column is not loaded to check, the first try is used.
-            for (int attempt = 0; attempt < 16; attempt++) {
-                double angle = random.nextDouble(0, Math.PI * 2);
-                double distance = min + random.nextDouble() * Math.max(0, cfg.getWormStartMaxDistance() - min);
-                start.set(tp.x + Math.cos(angle) * distance, tp.y, tp.z + Math.sin(angle) * distance);
-                Boolean sandy = world == null ? null : surfaceIsSand(world, start.x, start.z, sand.get());
-                if (sandy == null || sandy) {
-                    break; // sand, or not loaded so it cannot be checked
-                }
-            }
+            // Open sand, preferably a dune top; see WormStartFinder for the rules and the fallbacks.
+            WormStartFinder.Result found = WormStartFinder.find(world, tp, cfg, sand.get(), ThreadLocalRandom.current());
+            start.set(found.start);
+            WormsOfArrakisPlugin.get().getLogger().at(java.util.logging.Level.INFO).log("%s", found.describe());
             if (!forced) {
                 for (UUID id : ranking) {
                     PlayerAggro a = players.get(id);

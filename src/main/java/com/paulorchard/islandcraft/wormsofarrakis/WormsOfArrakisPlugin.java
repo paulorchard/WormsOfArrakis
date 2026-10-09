@@ -43,6 +43,10 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
         return effects;
     }
 
+    WormTestSystem jobSystem() {
+        return testSystem;
+    }
+
     WormsOfArrakisConfig config() {
         return config.get();
     }

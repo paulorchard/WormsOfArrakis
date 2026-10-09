@@ -1,0 +1,26 @@
+{
+  "TranslationProperties": {
+    "Name": "server.items.Arrakis_Worm_Sunk_2.name"
+  },
+  "PlayerAnimationsId": "Block",
+  "BlockType": {
+    "Material": "Solid",
+    "DrawType": "Model",
+    "CustomModel": "Blocks/Worms_of_Arrakis/Arrakis_Worm_Sunk_2.blockymodel",
+    "CustomModelTexture": [
+      {
+        "Texture": "BlockTextures/Soil_Sand_White.png",
+        "Weight": 1
+      }
+    ],
+    "Group": "Sand",
+    "Flags": {},
+    "BlockParticleSetId": "Sand",
+    "BlockSoundSetId": "Sand",
+    "PhysicalMaterialId": "Dirt",
+    "ParticleColor": "#fcdc7c",
+    "TextureComputedColor": "#E0C469",
+    "HitboxType": "Full",
+    "InteractionHitboxType": "Full"
+  }
+}

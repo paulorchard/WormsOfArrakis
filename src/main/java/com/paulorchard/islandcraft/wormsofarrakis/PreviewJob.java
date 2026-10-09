@@ -101,7 +101,7 @@ final class PreviewJob implements WormTestSystem.Job {
                 double interval = cfg.getRippleStartInterval() + (cfg.getRippleEndInterval() - cfg.getRippleStartInterval()) * u;
                 if (timer >= interval) {
                     timer = 0;
-                    fx.ripple(world, store, player, pos, (int) Math.round(cfg.getRippleRadius()), 1.2f, cfg);
+                    fx.sink(world, store, player.getUuid(), pos, 2, null, false, cfg.getRippleViewDistance(), player);
                 }
             }
             case "zoom" -> fx.fxOf(player).wantZoom(u);

@@ -32,6 +32,10 @@ public class WormTestSystem extends TickingSystem<EntityStore> {
 
     private final List<Job> jobs = new CopyOnWriteArrayList<>();
 
+    boolean isRunning(Job job) {
+        return jobs.contains(job);
+    }
+
     void add(Job job) {
         jobs.add(job);
     }
@@ -75,7 +79,7 @@ public class WormTestSystem extends TickingSystem<EntityStore> {
         }
     }
 
-    private void finish(Job job) {
+    void finish(Job job) {
         if (!jobs.remove(job)) {
             return;
         }

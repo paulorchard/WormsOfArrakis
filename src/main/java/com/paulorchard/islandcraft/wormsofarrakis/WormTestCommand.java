@@ -40,7 +40,7 @@ public class WormTestCommand extends AbstractCommandCollection {
         super("wormtest", LANG + "desc");
         this.system = system;
         this.sand = sand;
-        addSubCommand(Positional.build("ripple", LANG + "ripple.desc", this::ripple, "radius", "scope"));
+        addSubCommand(Positional.build("ripple", LANG + "ripple.desc", this::ripple, "increment", "scope", "rings", "seed", "shake", "step", "swing"));
         addSubCommand(Positional.build("vignette", LANG + "vignette.desc", this::vignette, "state", "variant"));
         addSubCommand(Positional.build("slow", LANG + "slow.desc", this::slow, "percent", "seconds", "fields", "hz"));
         addSubCommand(Positional.build("worm", LANG + "worm.desc", this::worm, "scale", "persist"));
@@ -48,16 +48,6 @@ public class WormTestCommand extends AbstractCommandCollection {
         addSubCommand(Positional.build("rumble", LANG + "rumble.desc", this::rumble, "seconds", "combo", "pitch"));
         addSubCommand(new WormSelfTest(sand));
         addSubCommand(Positional.build("speed", LANG + "speed.desc", this::speed, "seconds"));
-    }
-
-    /** The thin sand layer blocks of 1 to 4 px, -1 for any that is not loaded. */
-    static int[] layerBlockIds() {
-        int[] ids = new int[4];
-        for (int h = 1; h <= 4; h++) {
-            int id = com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType.getAssetMap().getIndex("Arrakis_Worm_Ripple_Layer_" + h);
-            ids[h - 1] = id == Integer.MIN_VALUE ? -1 : id;
-        }
-        return ids;
     }
 
     private static void say(CommandContext context, String text) {
@@ -71,42 +61,77 @@ public class WormTestCommand extends AbstractCommandCollection {
 
     // ------------------------------------------------------------------ 1. ripple
 
-    /** /wormtest ripple [radius] [raise|trough|both] [self|nearby] */
+    /**
+     * /wormtest ripple [increment] [self|nearby] [rings=3] [seed=N] [shake=on|off] [step=0.10] [swing=0.16]: the
+     * sink-and-rebound ripple. /wormtest ripple debug [increment] [rings] [seed] prints its numbers.
+     */
     private void ripple(CommandContext context, Store<EntityStore> store, Ref<EntityStore> ref, PlayerRef player,
-                        World world, String[] args) {
-        int radius = (int) Math.min(64, Math.max(1, Args.number(args, 0, 15)));
+                        World world, String[] rawArgs) {
+        // key=value and plain values are both accepted.
+        String[] args = new String[rawArgs.length];
+        for (int i = 0; i < args.length; i++) {
+            args[i] = rawArgs[i].substring(rawArgs[i].indexOf('=') + 1);
+        }
+        String first = Args.text(args, 0, "");
+        if (first.equals("debug")) {
+            SinkSchedule.Params params = SinkSchedule.Params.fromConfig(WormsOfArrakisPlugin.get().config());
+            params.increment = SinkSchedule.clampIncrement((int) Args.number(args, 1, params.increment));
+            params.rings = (int) Math.min(8, Math.max(1, Args.number(args, 2, params.rings)));
+            long seed = args.length > 3 ? (long) Args.number(args, 3, 0) : new java.util.Random().nextLong();
+            say(context, "sink debug: increment " + params.increment + ", rings " + params.rings + ", seed " + seed);
+            for (String line : new SinkSchedule(params, seed).describe()) {
+                say(context, line);
+            }
+            return;
+        }
+        double wanted = Args.number(args, 0, WormsOfArrakisPlugin.get().config().getSinkIncrement());
+        int increment = SinkSchedule.clampIncrement((int) Math.round(wanted));
+        if (increment != Math.round(wanted)) {
+            say(context, "ripple: increment " + wanted + " is outside 1 to 4 (the models stop at 16 px); using " + increment);
+        }
         String scope = Args.text(args, 1, "self");
         Vector3d p = position(store, ref);
         if (p == null) {
             return;
         }
         List<PlayerRef> viewers = new ArrayList<>();
-        List<double[]> avoid = new ArrayList<>();
         viewers.add(player);
-        avoid.add(new double[] {p.x, p.y, p.z});
         if (scope.equals("nearby")) {
-            for (PlayerRef other : world.getPlayerRefs()) {
-                Ref<EntityStore> otherRef = other.getReference();
-                if (other == player || otherRef == null || !otherRef.isValid()) {
-                    continue;
-                }
-                Vector3d q = position(store, otherRef);
-                if (q != null && q.distance(p) < radius + 48) {
+            double range = WormsOfArrakisPlugin.get().config().getRippleViewDistance();
+            for (PlayerRef other : WormEffects.near(world, store, p, range, null)) {
+                if (!other.getUuid().equals(player.getUuid())) {
                     viewers.add(other);
-                    avoid.add(new double[] {q.x, q.y, q.z});
                 }
             }
         }
-        Set<Integer> sandIds = sand.get();
-        RippleJob job = RippleJob.create(world, player.getUuid(), viewers, new double[] {p.x, p.y, p.z}, radius,
-                sandIds, layerBlockIds(), RippleJob.DURATION, avoid);
-        if (job.cellCount() == 0) {
-            say(context, "ripple: no sand columns found within " + radius + " blocks (sand ids " + sandIds + ")");
+        SinkJob.Options options = new SinkJob.Options();
+        options.owner = player.getUuid();
+        if (args.length > 2) {
+            options.rings = (int) Args.number(args, 2, 3);
+        }
+        if (args.length > 3) {
+            options.seed = (long) Args.number(args, 3, 0);
+        }
+        if (args.length > 4) {
+            options.shake = !Args.text(args, 4, "on").equals("off");
+        }
+        if (args.length > 5) {
+            options.stepSeconds = Args.number(args, 5, 0.10);
+        }
+        if (args.length > 6) {
+            options.swingSeconds = Args.number(args, 6, 0.16);
+        }
+        options.onFinish = text -> say(context, text);
+        if (!SinkJob.missingAssets().isEmpty()) {
+            say(context, "ripple: fake blocks not loaded: " + SinkJob.missingAssets());
             return;
         }
-        system.add(job);
-        say(context, String.format(Locale.ROOT, "ripple: %d columns, %d viewer(s), radius %d",
-                job.cellCount(), viewers.size(), radius));
+        SinkRipple.Handle handle = SinkRipple.play(world, p, increment, options, viewers);
+        if (handle == null) {
+            say(context, "ripple: no sand under you");
+            return;
+        }
+        say(context, "ripple: sink-and-rebound, increment " + increment + ", " + viewers.size() + " viewer(s)");
     }
 
     // ------------------------------------------------------------------ 2. vignette

@@ -111,6 +111,12 @@ final class WormSelfTest extends AbstractWorldCommand {
                 missing.add("camera shake " + id);
             }
         }
+        if (!SinkJob.missingAssets().isEmpty()) {
+            missing.add("sink blocks " + SinkJob.missingAssets());
+        }
+        if (com.hypixel.hytale.builtin.adventure.camera.asset.camerashake.CameraShake.getAssetMap().getIndex(SinkJob.SHAKE_ID) == Integer.MIN_VALUE) {
+            missing.add("camera shake " + SinkJob.SHAKE_ID);
+        }
         if (WormDevourDamage.cause() == null) {
             missing.add("damage cause " + WormDevourDamage.CAUSE_ID);
         }
@@ -119,9 +125,6 @@ final class WormSelfTest extends AbstractWorldCommand {
         }
         if (ModelAsset.getAssetMap().getAsset(WormJob.MODEL_ID) == null) {
             missing.add("model " + WormJob.MODEL_ID);
-        }
-        if (java.util.Arrays.stream(WormTestCommand.layerBlockIds()).anyMatch(id -> id < 0)) {
-            missing.add("blocks Arrakis_Worm_Ripple_Layer_1 to 4");
         }
         say(context, "assets missing: " + (missing.isEmpty() ? "none" : missing));
 
@@ -149,34 +152,8 @@ final class WormSelfTest extends AbstractWorldCommand {
         }
         say(context, "using sand at " + spot);
 
-        RippleJob ripple = RippleJob.create(world, java.util.UUID.randomUUID(), new ArrayList<>(),
-                new double[] {spot.x, spot.y, spot.z}, 5, sand.get(), WormTestCommand.layerBlockIds(), RippleJob.DURATION, new ArrayList<>());
-        int ticks = 0;
-        while (ripple.tick(1 / 30f, store) && ticks < 1000) {
-            ticks++;
-        }
-        say(context, "ripple: " + ripple.cellCount() + " columns, ran to its end in " + ticks + " ticks");
-
-        for (int radius : new int[] {5, 20, 40}) {
-            long t0 = System.nanoTime();
-            RippleJob big = RippleJob.create(world, java.util.UUID.randomUUID(), new ArrayList<>(),
-                    new double[] {spot.x, spot.y, spot.z}, radius, sand.get(), WormTestCommand.layerBlockIds(), RippleJob.DURATION, new ArrayList<>());
-            long built = System.nanoTime() - t0;
-            int n = 0;
-            t0 = System.nanoTime();
-            while (big.tick(1 / 30f, store) && n < 1000) {
-                n++;
-            }
-            long ran = System.nanoTime() - t0;
-            com.hypixel.hytale.protocol.packets.world.SetBlockCmd[] cmds =
-                    new com.hypixel.hytale.protocol.packets.world.SetBlockCmd[big.peakBlocksPerTick()];
-            java.util.Arrays.fill(cmds, new com.hypixel.hytale.protocol.packets.world.SetBlockCmd((short) 0, 1, (short) 0, (byte) 0));
-            int bytes = new com.hypixel.hytale.protocol.packets.world.ServerSetBlocks(0, 0, 0, cmds).computeSize();
-            say(context, String.format(java.util.Locale.ROOT,
-                    "ripple radius %d: %d columns (%d block updates), built in %.1f ms, %d ticks, tick loop %.1f ms, peak %d updates in one tick = %d bytes in one packet if all in one section (compressed: %s)",
-                    radius, big.cellCount(), big.cellCount() * 2, built / 1e6, n, ran / 1e6, big.peakBlocksPerTick(), bytes,
-                    com.hypixel.hytale.protocol.packets.world.ServerSetBlocks.IS_COMPRESSED));
-        }
+        sinkChecks(context, world, store, spot);
+        startFinderChecks(context, world, spot);
 
         for (boolean persist : new boolean[] {false, true}) {
             WormJob worm = WormJob.spawn(world, store, null, spot, new Vector3d(0, 0, 1), 1.0f, persist);
@@ -206,6 +183,87 @@ final class WormSelfTest extends AbstractWorldCommand {
         breach.abort(store);
         say(context, "breach: ran " + breachTicks + " ticks (" + String.format(java.util.Locale.ROOT, "%.1f", breachTicks / 30.0) + " s), worm removed. OK");
         say(context, "selftest finished: all checks passed");
+    }
+
+    /** The start-point search from the spawn: how often each rule is used and what it costs. Only chunks the headless server has loaded count. */
+    private void startFinderChecks(CommandContext context, World world, Vector3d spot) {
+        java.util.Map<String, Integer> rules = new java.util.TreeMap<>();
+        int sampled = 0;
+        int unloaded = 0;
+        double millis = 0;
+        int runs = 10;
+        for (int i = 0; i < runs; i++) {
+            WormStartFinder.Result r = WormStartFinder.find(world, spot, WormsOfArrakisPlugin.get().config(), sand.get(), new java.util.Random(i));
+            rules.merge(r.rule, 1, Integer::sum);
+            sampled += r.sampled;
+            unloaded += r.unloaded;
+            millis += r.millis;
+        }
+        say(context, String.format(java.util.Locale.ROOT,
+                "start finder: %d runs from the spawn, rules %s, %d of %d candidates in unloaded chunks, %.1f ms per search",
+                runs, rules, unloaded, sampled, millis / runs));
+    }
+
+    private void sinkChecks(CommandContext context, World world, Store<EntityStore> store, Vector3d spot) {
+        boolean ok = true;
+        for (int[] cfg : new int[][] {{1, 3}, {2, 3}, {3, 3}, {4, 3}, {2, 2}, {2, 4}, {4, 4}}) {
+            SinkSchedule.Params params = SinkSchedule.Params.fromConfig(WormsOfArrakisPlugin.get().config());
+            params.increment = cfg[0];
+            params.rings = cfg[1];
+            SinkJob.Options options = new SinkJob.Options();
+            options.seed = 5L;
+            SinkJob job = SinkJob.create(world, new ArrayList<>(), spot, params, sand.get(), false, options);
+            int n = 0;
+            int deepest = 0;
+            while (job.tick(1 / 30f, store) && n < 1000) {
+                deepest = Math.max(deepest, job.maxAbsOffset());
+                n++;
+            }
+            int atEnd = job.maxAbsOffset();
+            int dirty = job.dirtyCount();
+            job.abort(store);
+            boolean good = atEnd == 0 && dirty > 0 && job.dirtyCount() == 0;
+            ok &= good;
+            say(context, String.format(java.util.Locale.ROOT,
+                    "sink increment %d rings %d: %d of %d columns, %d ticks (%.2f s planned), deepest %d px, end offset %d, %d columns changed and restored: %s",
+                    cfg[0], cfg[1], job.cellCount(), (2 * cfg[1] + 1) * (2 * cfg[1] + 1), n, job.schedule().totalSeconds,
+                    deepest, atEnd, dirty, good ? "OK" : "FAILED"));
+        }
+        // The breach heave at its cap: cost with no viewers (the packets are counted per viewer in a real run).
+        SinkSchedule.Params big = SinkSchedule.Params.fromConfig(WormsOfArrakisPlugin.get().config());
+        big.increment = 4;
+        big.rings = (int) WormsOfArrakisPlugin.get().config().getBreachRippleMaxRings();
+        SinkJob.Options bigOptions = new SinkJob.Options();
+        bigOptions.seed = 5L;
+        SinkJob heave = SinkJob.create(world, new ArrayList<>(), spot, big, sand.get(), false, bigOptions);
+        int heaveTicks = 0;
+        long heaveStart = System.nanoTime();
+        while (heave.tick(1 / 30f, store) && heaveTicks < 1000) {
+            heaveTicks++;
+        }
+        long heaveNanos = System.nanoTime() - heaveStart;
+        int heaveEdits = heave.peakEdits;
+        heave.abort(store);
+        say(context, String.format(java.util.Locale.ROOT,
+                "sink heave rings %d: %d columns, %d ticks, %.3f ms per tick, peak %d block changes in one tick (about %d bytes in the packets, per viewer)",
+                big.rings, heave.cellCount(), heaveTicks, heaveNanos / 1e6 / Math.max(heaveTicks, 1), heaveEdits, heaveEdits * 9 + 40));
+        // Two at once on the same place: the newer wins the columns, both end clean.
+        SinkJob.Options options = new SinkJob.Options();
+        SinkJob older = SinkJob.create(world, new ArrayList<>(), spot, new SinkSchedule.Params(), sand.get(), false, options);
+        SinkJob newer = SinkJob.create(world, new ArrayList<>(), spot, new SinkSchedule.Params(), sand.get(), false, options);
+        for (int i = 0; i < 12; i++) {
+            older.tick(1 / 30f, store);
+            newer.tick(1 / 30f, store);
+        }
+        int olderDirty = older.dirtyCount();
+        older.abort(store);
+        newer.abort(store);
+        boolean good = olderDirty == 0 && older.dirtyCount() == 0 && newer.dirtyCount() == 0;
+        ok &= good;
+        say(context, "sink overlap: older ripple drew " + olderDirty + " columns while the newer owned them, both restored: " + (good ? "OK" : "FAILED"));
+        if (!ok) {
+            throw new IllegalStateException("sink ripple self-test failed");
+        }
     }
 
     private static void say(CommandContext context, String text) {

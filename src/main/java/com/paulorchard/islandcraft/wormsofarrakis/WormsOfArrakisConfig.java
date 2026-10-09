@@ -170,11 +170,6 @@ public class WormsOfArrakisConfig {
                             config -> config.rippleSeconds)
                     .documentation("The target ripple starts this long before LOCKED.")
                     .add()
-                    .append(new KeyedCodec<>("RippleRadius", Codec.DOUBLE, false),
-                            (config, value) -> config.rippleRadius = value,
-                            config -> config.rippleRadius)
-                    .documentation("Blocks. Radius of the target ripple.")
-                    .add()
                     .append(new KeyedCodec<>("RippleStartInterval", Codec.DOUBLE, false),
                             (config, value) -> config.rippleStartInterval = value,
                             config -> config.rippleStartInterval)
@@ -295,11 +290,6 @@ public class WormsOfArrakisConfig {
                             config -> config.breachDebrisScale)
                     .documentation("Particle scale of the thrown chunks of sand.")
                     .add()
-                    .append(new KeyedCodec<>("BreachRippleRadius", Codec.DOUBLE, false),
-                            (config, value) -> config.breachRippleRadius = value,
-                            config -> config.breachRippleRadius)
-                    .documentation("Blocks. Radius of the heave of fake blocks at the start of the breach.")
-                    .add()
                     .append(new KeyedCodec<>("BreachShakeRange", Codec.DOUBLE, false),
                             (config, value) -> config.breachShakeRange = value,
                             config -> config.breachShakeRange)
@@ -335,16 +325,6 @@ public class WormsOfArrakisConfig {
                             config -> config.devourHurtFraction)
                     .documentation("With DevourKills off, the share of the target current health taken (never lethal).")
                     .add()
-                    .append(new KeyedCodec<>("KnockbackRadius", Codec.DOUBLE, false),
-                            (config, value) -> config.knockbackRadius = value,
-                            config -> config.knockbackRadius)
-                    .documentation("Blocks. Bystanders this close to the target when the worm erupts are thrown back, unharmed.")
-                    .add()
-                    .append(new KeyedCodec<>("KnockbackForce", Codec.DOUBLE, false),
-                            (config, value) -> config.knockbackForce = value,
-                            config -> config.knockbackForce)
-                    .documentation("Horizontal speed in blocks per second given to a thrown bystander (or to a surviving target).")
-                    .add()
                     .append(new KeyedCodec<>("CameraShakeScale", Codec.DOUBLE, false),
                             (config, value) -> config.cameraShakeScale = value,
                             config -> config.cameraShakeScale)
@@ -369,6 +349,111 @@ public class WormsOfArrakisConfig {
                             (config, value) -> config.zoomDistance = value,
                             config -> config.zoomDistance)
                     .documentation("Camera distance in blocks at the end of the zoom: about three times the usual third person distance.")
+                    .add()
+                    .append(new KeyedCodec<>("WormStartCandidates", Codec.DOUBLE, false),
+                            (config, value) -> config.wormStartCandidates = value,
+                            config -> config.wormStartCandidates)
+                    .documentation("How many candidate start points are sampled in the WormStartMinDistance to WormStartMaxDistance ring.")
+                    .add()
+                    .append(new KeyedCodec<>("WormStartOpenRadius", Codec.DOUBLE, false),
+                            (config, value) -> config.wormStartOpenRadius = value,
+                            config -> config.wormStartOpenRadius)
+                    .documentation("Blocks. A start point counts only if every surface block this close is sand.")
+                    .add()
+                    .append(new KeyedCodec<>("WormStartHeightTolerance", Codec.DOUBLE, false),
+                            (config, value) -> config.wormStartHeightTolerance = value,
+                            config -> config.wormStartHeightTolerance)
+                    .documentation("Blocks. The start is a random one among the qualifying points this close to the highest.")
+                    .add()
+                    .append(new KeyedCodec<>("StartBoomDustScale", Codec.DOUBLE, false),
+                            (config, value) -> config.startBoomDustScale = value,
+                            config -> config.startBoomDustScale)
+                    .documentation("Particle scale of the dust burst at the worm start point when an event begins.")
+                    .add()
+                    .append(new KeyedCodec<>("StartRippleDelay", Codec.DOUBLE, false),
+                            (config, value) -> config.startRippleDelay = value,
+                            config -> config.startRippleDelay)
+                    .documentation("Seconds after the start boom that everyone near, standing on sand, feels the warning ripple.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachRippleMaxRings", Codec.DOUBLE, false),
+                            (config, value) -> config.breachRippleMaxRings = value,
+                            config -> config.breachRippleMaxRings)
+                    .documentation("Most rings the breach heave is allowed (it uses ceil of the worm radius, so 8 is a 17 by 17 patch).")
+                    .add()
+                    .append(new KeyedCodec<>("BreachLiftsVictim", Codec.BOOLEAN, false),
+                            (config, value) -> config.breachLiftsVictim = value,
+                            config -> config.breachLiftsVictim)
+                    .documentation("Lift the victim up with the worm before the swallow (the old behaviour). Off by default.")
+                    .add()
+                    .append(new KeyedCodec<>("BreachVolumeKills", Codec.BOOLEAN, false),
+                            (config, value) -> config.breachVolumeKills = value,
+                            config -> config.breachVolumeKills)
+                    .documentation("Anyone inside the worm body while it is up dies at once (DevourKills still decides death or heavy damage).")
+                    .add()
+                    .append(new KeyedCodec<>("RippleShake", Codec.BOOLEAN, false),
+                            (config, value) -> config.rippleShake = value,
+                            config -> config.rippleShake)
+                    .documentation("Sink-and-rebound ripple: a small camera shake on the first drop and on the first two rebound peaks.")
+                    .add()
+                    .append(new KeyedCodec<>("RippleShakeStrength", Codec.DOUBLE, false),
+                            (config, value) -> config.rippleShakeStrength = value,
+                            config -> config.rippleShakeStrength)
+                    .documentation("Intensity of that shake (times CameraShakeScale), before the fall-off with distance.")
+                    .add()
+                    .append(new KeyedCodec<>("SinkIncrement", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkIncrement = value,
+                            config -> config.sinkIncrement)
+                    .documentation("Pixels the centre drops on each descent step (1 to 4); everything else scales with it.")
+                    .add()
+                    .append(new KeyedCodec<>("SinkRings", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkRings = value,
+                            config -> config.sinkRings)
+                    .documentation("Rings round the centre block (3 is a 7 by 7 patch).")
+                    .add()
+                    .append(new KeyedCodec<>("SinkStepSeconds", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkStepSeconds = value,
+                            config -> config.sinkStepSeconds)
+                    .documentation("Seconds between descent steps.")
+                    .add()
+                    .append(new KeyedCodec<>("SinkSwingSeconds", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkSwingSeconds = value,
+                            config -> config.sinkSwingSeconds)
+                    .documentation("Seconds for one swing of the rebound, before the per-block random factor.")
+                    .add()
+                    .append(new KeyedCodec<>("SinkSwingJitter", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkSwingJitter = value,
+                            config -> config.sinkSwingJitter)
+                    .documentation("Each block swings this much faster or slower (a fraction, 0.15 is 0.85 to 1.15).")
+                    .add()
+                    .append(new KeyedCodec<>("SinkDropMin", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkDropMin = value,
+                            config -> config.sinkDropMin)
+                    .documentation("Smallest drop of a ring block per step, times the increment (at least 1 px).")
+                    .add()
+                    .append(new KeyedCodec<>("SinkDropMax", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkDropMax = value,
+                            config -> config.sinkDropMax)
+                    .documentation("Largest drop of a ring block per step, times the increment.")
+                    .add()
+                    .append(new KeyedCodec<>("SinkReboundMin", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkReboundMin = value,
+                            config -> config.sinkReboundMin)
+                    .documentation("The first rebound peak is at least this fraction of the depth.")
+                    .add()
+                    .append(new KeyedCodec<>("SinkReboundMax", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkReboundMax = value,
+                            config -> config.sinkReboundMax)
+                    .documentation("The first rebound peak is at most this fraction of the depth.")
+                    .add()
+                    .append(new KeyedCodec<>("SinkDecayMin", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkDecayMin = value,
+                            config -> config.sinkDecayMin)
+                    .documentation("Each later swing is at least this fraction of the one before.")
+                    .add()
+                    .append(new KeyedCodec<>("SinkDecayMax", Codec.DOUBLE, false),
+                            (config, value) -> config.sinkDecayMax = value,
+                            config -> config.sinkDecayMax)
+                    .documentation("Each later swing is at most this fraction of the one before.")
                     .add()
                     // END GENERATED CODEC
                     .build();
@@ -405,7 +490,6 @@ public class WormsOfArrakisConfig {
     private double rumbleTargetEndPitch = 0.85;
     private double rumbleIntervalSeconds = 3;
     private double rippleSeconds = 15;
-    private double rippleRadius = 5;
     private double rippleStartInterval = 4;
     private double rippleEndInterval = 1;
     private double rippleViewDistance = 30;
@@ -430,7 +514,6 @@ public class WormsOfArrakisConfig {
     private double breachWormSize = 3;
     private double breachDustScale = 6;
     private double breachDebrisScale = 3;
-    private double breachRippleRadius = 8;
     private double breachShakeRange = 40;
     private double breachShakeStrength = 1.5;
     private double breachBoomVolume = 1;
@@ -438,13 +521,32 @@ public class WormsOfArrakisConfig {
     private boolean devourKills = true;
     private boolean devourDropsItems = false;
     private double devourHurtFraction = 0.8;
-    private double knockbackRadius = 4;
-    private double knockbackForce = 16;
     private double cameraShakeScale = 0.5;
     private boolean cameraZoom = true;
     private double zoomSeconds = 2;
     private double zoomFromDistance = 5;
     private double zoomDistance = 15;
+    private double wormStartCandidates = 48;
+    private double wormStartOpenRadius = 4;
+    private double wormStartHeightTolerance = 2;
+    private double startBoomDustScale = 3;
+    private double startRippleDelay = 1;
+    private double breachRippleMaxRings = 8;
+    private boolean breachLiftsVictim = false;
+    private boolean breachVolumeKills = true;
+    private boolean rippleShake = true;
+    private double rippleShakeStrength = 0.5;
+    private double sinkIncrement = 2;
+    private double sinkRings = 4;
+    private double sinkStepSeconds = 0.1;
+    private double sinkSwingSeconds = 0.16;
+    private double sinkSwingJitter = 0.15;
+    private double sinkDropMin = 0.5;
+    private double sinkDropMax = 1.5;
+    private double sinkReboundMin = 0.75;
+    private double sinkReboundMax = 0.88;
+    private double sinkDecayMin = 0.55;
+    private double sinkDecayMax = 0.85;
     // END GENERATED FIELDS
 
     public String[] getSandBlocks() {
@@ -533,6 +635,11 @@ public class WormsOfArrakisConfig {
 
 
 
+
+
+
+
+
     // GENERATED GETTERS
     public double getPathEaseExponent() {
         return pathEaseExponent;
@@ -576,10 +683,6 @@ public class WormsOfArrakisConfig {
 
     public double getRippleSeconds() {
         return rippleSeconds;
-    }
-
-    public double getRippleRadius() {
-        return rippleRadius;
     }
 
     public double getRippleStartInterval() {
@@ -678,10 +781,6 @@ public class WormsOfArrakisConfig {
         return breachDebrisScale;
     }
 
-    public double getBreachRippleRadius() {
-        return breachRippleRadius;
-    }
-
     public double getBreachShakeRange() {
         return breachShakeRange;
     }
@@ -710,14 +809,6 @@ public class WormsOfArrakisConfig {
         return devourHurtFraction;
     }
 
-    public double getKnockbackRadius() {
-        return knockbackRadius;
-    }
-
-    public double getKnockbackForce() {
-        return knockbackForce;
-    }
-
     public double getCameraShakeScale() {
         return cameraShakeScale;
     }
@@ -736,6 +827,90 @@ public class WormsOfArrakisConfig {
 
     public double getZoomDistance() {
         return zoomDistance;
+    }
+
+    public double getWormStartCandidates() {
+        return wormStartCandidates;
+    }
+
+    public double getWormStartOpenRadius() {
+        return wormStartOpenRadius;
+    }
+
+    public double getWormStartHeightTolerance() {
+        return wormStartHeightTolerance;
+    }
+
+    public double getStartBoomDustScale() {
+        return startBoomDustScale;
+    }
+
+    public double getStartRippleDelay() {
+        return startRippleDelay;
+    }
+
+    public double getBreachRippleMaxRings() {
+        return breachRippleMaxRings;
+    }
+
+    public boolean isBreachLiftsVictim() {
+        return breachLiftsVictim;
+    }
+
+    public boolean isBreachVolumeKills() {
+        return breachVolumeKills;
+    }
+
+    public boolean isRippleShake() {
+        return rippleShake;
+    }
+
+    public double getRippleShakeStrength() {
+        return rippleShakeStrength;
+    }
+
+    public double getSinkIncrement() {
+        return sinkIncrement;
+    }
+
+    public double getSinkRings() {
+        return sinkRings;
+    }
+
+    public double getSinkStepSeconds() {
+        return sinkStepSeconds;
+    }
+
+    public double getSinkSwingSeconds() {
+        return sinkSwingSeconds;
+    }
+
+    public double getSinkSwingJitter() {
+        return sinkSwingJitter;
+    }
+
+    public double getSinkDropMin() {
+        return sinkDropMin;
+    }
+
+    public double getSinkDropMax() {
+        return sinkDropMax;
+    }
+
+    public double getSinkReboundMin() {
+        return sinkReboundMin;
+    }
+
+    public double getSinkReboundMax() {
+        return sinkReboundMax;
+    }
+
+    public double getSinkDecayMin() {
+        return sinkDecayMin;
+    }
+
+    public double getSinkDecayMax() {
+        return sinkDecayMax;
     }
     // END GENERATED GETTERS
 }

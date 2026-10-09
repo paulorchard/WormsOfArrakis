@@ -44,6 +44,10 @@ final class WormEffects implements WormEventListener {
         double puff;
         double rumble = 1e9;
         double ripple;
+        /** Sink ripples of LOCKED that may still be running (at most two at once). */
+        final List<SinkRipple.Handle> locked = new ArrayList<>();
+        /** How long the last STALKING ripple takes: the next one starts no sooner than a quarter of it. */
+        double lastRippleSeconds;
         double shake;
         final Map<UUID, Double> passed = new HashMap<>();
         double clock;
@@ -114,6 +118,12 @@ final class WormEffects implements WormEventListener {
 
     @Override
     public void onPhaseChange(WormEvent event, WormPhase old, WormPhase now) {
+        if (old == null) {
+            World startWorld = Universe.get().getWorld(event.getWorldName());
+            if (startWorld != null) {
+                WormStartFx.play(startWorld, startWorld.getEntityStore().getStore(), event, config.get(), jobs, sand.get());
+            }
+        }
         if (now != WormPhase.BREACH || event.getTarget() == null) {
             return;
         }
@@ -170,6 +180,7 @@ final class WormEffects implements WormEventListener {
         if (reason == WormEndReason.STOPPED) {
             if (event.getTarget() != null) {
                 jobs.stop(event.getTarget(), "breach");
+                jobs.stop(event.getTarget(), "sink");
             }
             for (UUID id : event.getGroup()) {
                 TargetFx f = fx.remove(id);
@@ -315,55 +326,52 @@ final class WormEffects implements WormEventListener {
 
     // ------------------------------------------------------------------ ripple
 
+    /**
+     * The sink-and-rebound ripple under the target: STALKING in the last RippleSeconds at the eased interval (but never
+     * sooner than a quarter of the last one's length), and in LOCKED back to back with at most two running.
+     */
     private void ripples(World world, Store<EntityStore> store, State s, PlayerRef target, Vector3d targetPos,
                          WormPhase phase, double left, WormsOfArrakisConfig cfg) {
         s.ripple += dt;
-        double interval;
-        int radius;
-        float duration;
         if (phase == WormPhase.LOCKED) {
-            // Continuous and tight: the sand right round the target jumps.
-            interval = cfg.getLockedRippleInterval();
-            radius = 2;
-            duration = 0.3f;
-        } else {
-            if (left > cfg.getRippleSeconds()) {
+            s.locked.removeIf(h -> !h.running());
+            if (s.ripple < cfg.getLockedRippleInterval() || s.locked.size() >= 2) {
                 return;
             }
-            double q = clamp01(1 - left / Math.max(cfg.getRippleSeconds(), 0.001));
-            interval = lerp(cfg.getRippleStartInterval(), cfg.getRippleEndInterval(), q);
-            radius = (int) Math.round(cfg.getRippleRadius());
-            duration = 1.2f;
+            s.ripple = 0;
+            SinkRipple.Handle h = sink(world, store, target.getUuid(), targetPos, 3, 2, false, cfg.getRippleViewDistance(), target);
+            if (h != null) {
+                s.locked.add(h);
+            }
+            return;
         }
+        if (left > cfg.getRippleSeconds()) {
+            return;
+        }
+        double q = clamp01(1 - left / Math.max(cfg.getRippleSeconds(), 0.001));
+        double interval = Math.max(lerp(cfg.getRippleStartInterval(), cfg.getRippleEndInterval(), q), 0.25 * s.lastRippleSeconds);
         if (s.ripple < interval) {
             return;
         }
         s.ripple = 0;
-        ripple(world, store, target, targetPos, radius, duration, cfg);
+        SinkRipple.Handle h = sink(world, store, target.getUuid(), targetPos, 2, null, false, cfg.getRippleViewDistance(), target);
+        if (h != null) {
+            s.lastRippleSeconds = h.seconds();
+        }
     }
 
-    /** One ring-by-ring ripple round a point, shown to the owner and to players near it. */
-    void ripple(World world, Store<EntityStore> store, PlayerRef owner, Vector3d at, int radius, float duration,
-                WormsOfArrakisConfig cfg) {
-        ripple(world, store, owner, owner.getUuid(), at, radius, duration, cfg.getRippleViewDistance(), cfg);
-    }
-
-    /** {@code owner} may be null (a breach with nobody there); {@code ownerId} owns the job so it is undone with them. */
-    void ripple(World world, Store<EntityStore> store, PlayerRef owner, UUID ownerId, Vector3d at, int radius,
-                float duration, double viewRange, WormsOfArrakisConfig cfg) {
-        List<double[]> avoid = new ArrayList<>();
+    /**
+     * One sink-and-rebound ripple under {@code at}, shown to {@code owner} (may be null) and to players within
+     * {@code viewRange}. {@code ownerId} owns the job so it is undone with them. Null if there was no sand.
+     */
+    SinkRipple.Handle sink(World world, Store<EntityStore> store, UUID ownerId, Vector3d at, int increment, Integer rings,
+                           boolean shake, double viewRange, PlayerRef owner) {
         List<PlayerRef> viewers = near(world, store, at, viewRange, owner);
-        for (PlayerRef v : viewers) {
-            Vector3d p = position(store, v);
-            if (p != null) {
-                avoid.add(new double[] {p.x, p.y, p.z});
-            }
-        }
-        RippleJob job = RippleJob.create(world, ownerId, viewers, new double[] {at.x, at.y, at.z}, radius,
-                sand.get(), WormTestCommand.layerBlockIds(), duration, avoid);
-        if (job.cellCount() > 0) {
-            jobs.add(job);
-        }
+        SinkJob.Options options = new SinkJob.Options();
+        options.owner = ownerId;
+        options.rings = rings;
+        options.shake = shake;
+        return SinkRipple.play(world, at, increment, options, viewers);
     }
 
     // ------------------------------------------------------------------ the target only
