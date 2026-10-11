@@ -168,6 +168,12 @@ final class BreachCamera {
      */
     void pin(World world, Store<EntityStore> store, WormsOfArrakisConfig cfg, PlayerRef player, Vector3d lookAt,
              Vector3d centre, Vector3d heading, double wormHeight) {
+        pin(world, store, cfg, player, lookAt, centre, heading, wormHeight, -1);
+    }
+
+    /** As above, with the distance behind the eye given (a sand disturbance has no worm to scale it by); 0 or less keeps the breach's. */
+    void pin(World world, Store<EntityStore> store, WormsOfArrakisConfig cfg, PlayerRef player, Vector3d lookAt,
+             Vector3d centre, Vector3d heading, double wormHeight, double distanceBehind) {
         Member m = members.get(player.getUuid());
         if (m == null) {
             m = new Member(player);
@@ -182,7 +188,7 @@ final class BreachCamera {
             sendFixed(world, store, m, centre, heading, wormHeight, distance(cfg));
             return;
         }
-        double d = m.sent > 0 ? m.sent : distance(cfg);
+        double d = distanceBehind > 0 ? distanceBehind : m.sent > 0 ? m.sent : distance(cfg);
         Vector3d dir = head.getDirection();
         double cx = at.x - dir.x * d;
         double cy = at.y + 1.6 - dir.y * d;

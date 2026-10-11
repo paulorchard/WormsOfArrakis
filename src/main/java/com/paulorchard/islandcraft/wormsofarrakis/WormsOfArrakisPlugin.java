@@ -18,6 +18,8 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
     /** The vanilla sand blocks (Server/Item/Items/Soil/Sand), used when Dunes of Arrakis is not installed. */
     static final String[] VANILLA_SAND = {"Soil_Sand", "Soil_Sand_Ashen", "Soil_Sand_Red", "Soil_Sand_White"};
     static final String DUNES_SAND = "Arrakis_Sand";
+    /** What {@link #arrakisSandId()} returns when Dunes of Arrakis is not installed. */
+    static final int NOT_INSTALLED = Integer.MIN_VALUE;
 
     private static WormsOfArrakisPlugin instance;
 
@@ -28,6 +30,7 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
     private final WormTestSystem testSystem = new WormTestSystem();
     private final AggroManager aggro = new AggroManager(config::get, this::sandBlockIds);
     private final WormEffects effects = new WormEffects(() -> config.get(), this::sandBlockIds, testSystem);
+    private final DisturbanceManager disturbances = new DisturbanceManager();
     private WormCommand wormCommand;
 
     public WormsOfArrakisPlugin(JavaPluginInit init) {
@@ -55,13 +58,22 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
         return aggro;
     }
 
+    DisturbanceManager disturbances() {
+        return disturbances;
+    }
+
     @Override
     protected void setup() {
         writeConfig();
         getEntityStoreRegistry().registerSystem(testSystem);
         getEntityStoreRegistry().registerSystem(new WormBrainSystem(aggro, effects));
+        // The sand disturbance: what players place on Arrakis_Sand, and the clock that takes it back.
+        getEntityStoreRegistry().registerSystem(disturbances);
+        getEntityStoreRegistry().registerSystem(disturbances.tracker().placeSystem());
+        getEntityStoreRegistry().registerSystem(disturbances.tracker().breakSystem());
+        getEntityStoreRegistry().registerSystem(disturbances.tracker().environmentBreakSystem());
         getCommandRegistry().registerCommand(new WormTestCommand(testSystem, this::sandBlockIds));
-        wormCommand = new WormCommand(aggro, config::get, effects, testSystem);
+        wormCommand = new WormCommand(aggro, config::get, effects, testSystem, disturbances);
         getCommandRegistry().registerCommand(wormCommand);
         WormEvents.get().addListener(new WormEventLog(aggro, config::get, () -> wormCommand.getPermission()));
         WormEvents.get().addListener(effects);
@@ -85,14 +97,38 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
     @Override
     protected void start() {
         getLogger().at(Level.INFO).log("Sand block ids in this game: %s", Arrays.toString(sandBlockIds().toArray()));
+        WormsOfArrakisConfig c = config.get();
+        getLogger().at(Level.INFO).log("%s", String.format(java.util.Locale.ROOT,
+                "Sand disturbance settings (new keys): DisturbanceEnabled=%s DisturbanceSeconds=%s DisturbanceSwallowLead=%s "
+                        + "DisturbanceBoomLead=%s DisturbancePulseSeconds=%s DisturbanceIncrementStart=%s DisturbanceIncrementEnd=%s "
+                        + "DisturbanceMaxEditsPerTick=%s DisturbanceViewDistance=%s DisturbanceDustScale=%s DisturbanceMaxBursts=%s "
+                        + "DisturbanceCreativeTriggers=%s DisturbanceLagFallback=%s DisturbanceLagMillis=%s DisturbanceMaxCost=%s "
+                        + "DisturbanceFallbackSeconds=%s",
+                c.isDisturbanceEnabled(), c.getDisturbanceSeconds(), c.getDisturbanceSwallowLead(), c.getDisturbanceBoomLead(),
+                c.getDisturbancePulseSeconds(), c.getDisturbanceIncrementStart(), c.getDisturbanceIncrementEnd(),
+                c.getDisturbanceMaxEditsPerTick(), c.getDisturbanceViewDistance(), c.getDisturbanceDustScale(),
+                c.getDisturbanceMaxBursts(), c.isDisturbanceCreativeTriggers(), c.isDisturbanceLagFallback(),
+                c.getDisturbanceLagMillis(), c.getDisturbanceMaxCost(), c.getDisturbanceFallbackSeconds()));
+        getLogger().at(Level.INFO).log("Sand disturbance: %s", arrakisSandId() == NOT_INSTALLED
+                ? "Dunes of Arrakis is not installed, so nothing is tracked and nothing happens"
+                : "Arrakis_Sand is block id " + arrakisSandId());
     }
 
     /** Restores every test effect and ends every worm event before the plugin goes. */
     @Override
     protected void shutdown() {
+        disturbances.abortAll();
         effects.restoreAll();
         testSystem.abortAll();
         WormEvents.get().stop(null);
+    }
+
+    /**
+     * The numeric id of Arrakis_Sand, or {@link #NOT_INSTALLED} if Dunes of Arrakis is not installed. Unlike
+     * {@link #sandBlockIds()} this never falls back to the vanilla sand, and ignores the SandBlocksOverride.
+     */
+    int arrakisSandId() {
+        return BlockType.getAssetMap().getIndex(DUNES_SAND);
     }
 
     /**

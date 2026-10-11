@@ -61,6 +61,8 @@ final class BreachHold {
         Vector3d surface;
         Rotation3f facing;
         boolean sunk;
+        /** Blocks to sink instead of the breach's depth (a disturbance sinks someone from a placed block); null = default. */
+        Double depth;
 
         Held(PlayerRef player) {
             this.player = player;
@@ -102,6 +104,29 @@ final class BreachHold {
             held.put(p.getUuid(), new Held(p));
             addEffect(store, ref, HOLD);
         }
+    }
+
+    /** Holds one player (a disturbance decides who by where they stand). Returns false if they cannot be held. */
+    boolean capturePlayer(Store<EntityStore> store, PlayerRef p) {
+        Ref<EntityStore> ref = p.getReference();
+        if (ref == null || !ref.isValid() || isDead(store, ref) || held.containsKey(p.getUuid())) {
+            return false;
+        }
+        held.put(p.getUuid(), new Held(p));
+        addEffect(store, ref, HOLD);
+        return true;
+    }
+
+    /** Sinks this player this many blocks instead of the depth given to {@link #sinkTo}. */
+    void setDepth(UUID player, double blocks) {
+        Held h = held.get(player);
+        if (h != null) {
+            h.depth = blocks;
+        }
+    }
+
+    boolean isHeld(UUID player) {
+        return held.containsKey(player);
     }
 
     /** Drops anyone who has left, died or changed world, undoing what was done to them. */
@@ -182,11 +207,11 @@ final class BreachHold {
      */
     void sinkTo(World world, Store<EntityStore> store, double depth, double fraction) {
         double q = Math.max(0, Math.min(1, fraction));
-        double drop = depth * q * q;
         for (Held h : held.values()) {
             if (!h.sunk) {
                 continue;
             }
+            double drop = (h.depth != null ? h.depth : depth) * q * q;
             Ref<EntityStore> ref = h.player.getReference();
             if (ref == null || !ref.isValid()) {
                 continue;

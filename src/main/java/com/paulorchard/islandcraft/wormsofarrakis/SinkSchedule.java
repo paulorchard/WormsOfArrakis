@@ -114,7 +114,7 @@ final class SinkSchedule {
         this.totalSeconds = total;
     }
 
-    private static int[] rebound(Random random, int depth, Params p) {
+    static int[] rebound(Random random, int depth, Params p) {
         List<Integer> out = new ArrayList<>();
         if (depth > 0) {
             int a = (int) Math.round(depth * (p.reboundMin + random.nextDouble() * (p.reboundMax - p.reboundMin)));
@@ -141,21 +141,31 @@ final class SinkSchedule {
 
     /** The offset in whole pixels of a cell t seconds after the start. */
     int offsetAt(Cell cell, double t) {
+        return offsetAt(cell.depthAfterStep, cell.extremes, cell.swingSeconds, params.stepSeconds, t);
+    }
+
+    /**
+     * The same curve for any block: descent steps of {@code stepSeconds} to the given depths, then the rebound swings
+     * between the extremes, a cosine ease each. {@code t} is seconds since the descent began.
+     */
+    static int offsetAt(int[] depthAfterStep, int[] extremes, double swingSeconds, double stepSeconds, double t) {
+        int steps = depthAfterStep.length;
+        double descentSeconds = steps * stepSeconds;
         if (t < descentSeconds) {
-            int step = Math.min(steps, (int) (t / params.stepSeconds) + 1);
-            return -cell.depthAfterStep[step - 1];
+            int step = Math.min(steps, (int) (t / stepSeconds) + 1);
+            return -depthAfterStep[step - 1];
         }
-        if (cell.extremes.length == 0) {
+        if (extremes.length == 0) {
             return 0;
         }
         double tau = t - descentSeconds;
-        int seg = (int) (tau / cell.swingSeconds);
-        if (seg >= cell.extremes.length) {
+        int seg = (int) (tau / swingSeconds);
+        if (seg >= extremes.length) {
             return 0;
         }
-        int from = seg == 0 ? -cell.depth() : cell.extremes[seg - 1];
-        int to = cell.extremes[seg];
-        double f = (tau - seg * cell.swingSeconds) / cell.swingSeconds;
+        int from = seg == 0 ? -depthAfterStep[steps - 1] : extremes[seg - 1];
+        int to = extremes[seg];
+        double f = (tau - seg * swingSeconds) / swingSeconds;
         return (int) Math.round(from + (to - from) * (1 - Math.cos(Math.PI * f)) / 2);
     }
 

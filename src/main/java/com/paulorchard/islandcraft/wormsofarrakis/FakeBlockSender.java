@@ -29,6 +29,8 @@ final class FakeBlockSender {
     long packets;
     long blocks;
     long bytes;
+    /** For measuring: count each packet as if this many more viewers had the section loaded (nothing is sent to them). */
+    int simulatedViewers;
 
     FakeBlockSender(World world, List<PlayerRef> viewers) {
         this.world = world;
@@ -71,6 +73,12 @@ final class FakeBlockSender {
             int[] s = sectionCoords.get(entry.getKey());
             ServerSetBlocks packet = new ServerSetBlocks(s[0], s[1], s[2], entry.getValue().toArray(new SetBlockCmd[0]));
             int size = -1;
+            if (simulatedViewers > 0) {
+                size = packet.computeSize();
+                sent += simulatedViewers;
+                blocks += (long) entry.getValue().size() * simulatedViewers;
+                bytes += (long) size * simulatedViewers;
+            }
             for (PlayerRef viewer : viewers) {
                 if (viewer.getReference() != null && viewer.getChunkTracker().isLoaded(s[0], s[1], s[2])) {
                     viewer.getPacketHandler().writeNoCache(packet);

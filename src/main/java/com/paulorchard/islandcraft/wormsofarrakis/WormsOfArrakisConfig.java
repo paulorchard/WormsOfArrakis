@@ -505,6 +505,86 @@ public class WormsOfArrakisConfig {
                             config -> config.sinkDecayMax)
                     .documentation("Each later swing is at most this fraction of the one before.")
                     .add()
+                    .append(new KeyedCodec<>("DisturbanceEnabled", Codec.BOOLEAN, false),
+                            (config, value) -> config.disturbanceEnabled = value,
+                            config -> config.disturbanceEnabled)
+                    .documentation("Placing a block on Arrakis_Sand starts a rumble in that chunk, and the worm takes what was placed. False turns it all off.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceSeconds", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceSeconds = value,
+                            config -> config.disturbanceSeconds)
+                    .documentation("Seconds from the first placement to the end of the disturbance, when the held players are killed.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceSwallowLead", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceSwallowLead = value,
+                            config -> config.disturbanceSwallowLead)
+                    .documentation("Seconds before the end that everyone standing on Arrakis_Sand or a placed block in the chunk is held (decided once, then).")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceBoomLead", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceBoomLead = value,
+                            config -> config.disturbanceBoomLead)
+                    .documentation("Seconds after the capture that the dust and the boom come, every placed block is removed and the held players start to sink.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbancePulseSeconds", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbancePulseSeconds = value,
+                            config -> config.disturbancePulseSeconds)
+                    .documentation("Each sand column starts one pulse at a random moment within every period of this length.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceIncrementStart", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceIncrementStart = value,
+                            config -> config.disturbanceIncrementStart)
+                    .documentation("Pixels of the first drop of a pulse at the centre of the placed blocks, at the start of the disturbance.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceIncrementEnd", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceIncrementEnd = value,
+                            config -> config.disturbanceIncrementEnd)
+                    .documentation("The same at the end of the disturbance; it rises in between.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceMaxEditsPerTick", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceMaxEditsPerTick = value,
+                            config -> config.disturbanceMaxEditsPerTick)
+                    .documentation("Most fake block edits sent in one tick (a moving column is two edits); the rest wait for the next ticks.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceViewDistance", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceViewDistance = value,
+                            config -> config.disturbanceViewDistance)
+                    .documentation("Blocks from the chunk centre. Players this close see the sand rumble.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceDustScale", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceDustScale = value,
+                            config -> config.disturbanceDustScale)
+                    .documentation("Particle scale of the dust when the worm takes the blocks (the same default as BreachDustScale).")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceMaxBursts", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceMaxBursts = value,
+                            config -> config.disturbanceMaxBursts)
+                    .documentation("Most dust bursts at placed block positions when they vanish; more positions are sampled.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceCreativeTriggers", Codec.BOOLEAN, false),
+                            (config, value) -> config.disturbanceCreativeTriggers = value,
+                            config -> config.disturbanceCreativeTriggers)
+                    .documentation("Blocks placed by Creative players start a disturbance and are tracked (a Creative player is never killed).")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceLagFallback", Codec.BOOLEAN, false),
+                            (config, value) -> config.disturbanceLagFallback = value,
+                            config -> config.disturbanceLagFallback)
+                    .documentation("Drop the rumble visuals and shorten the event when the server is lagging. False turns the check off.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceLagMillis", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceLagMillis = value,
+                            config -> config.disturbanceLagMillis)
+                    .documentation("Milliseconds. The fallback is used if the average time between ticks over the last two seconds is above this. 0 means 1.5 times the normal tick length.")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceMaxCost", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceMaxCost = value,
+                            config -> config.disturbanceMaxCost)
+                    .documentation("The fallback is also used if columns times viewers is above this (a full chunk is 1024 columns).")
+                    .add()
+                    .append(new KeyedCodec<>("DisturbanceFallbackSeconds", Codec.DOUBLE, false),
+                            (config, value) -> config.disturbanceFallbackSeconds = value,
+                            config -> config.disturbanceFallbackSeconds)
+                    .documentation("In the fallback the event ends this many seconds after it started (or at once if that is past).")
+                    .add()
                     // END GENERATED CODEC
                     .build();
 
@@ -607,6 +687,22 @@ public class WormsOfArrakisConfig {
     private double sinkReboundMax = 0.88;
     private double sinkDecayMin = 0.55;
     private double sinkDecayMax = 0.85;
+    private boolean disturbanceEnabled = true;
+    private double disturbanceSeconds = 10;
+    private double disturbanceSwallowLead = 1;
+    private double disturbanceBoomLead = 0.5;
+    private double disturbancePulseSeconds = 1.2;
+    private double disturbanceIncrementStart = 1;
+    private double disturbanceIncrementEnd = 3;
+    private double disturbanceMaxEditsPerTick = 600;
+    private double disturbanceViewDistance = 128;
+    private double disturbanceDustScale = 6;
+    private double disturbanceMaxBursts = 64;
+    private boolean disturbanceCreativeTriggers = true;
+    private boolean disturbanceLagFallback = true;
+    private double disturbanceLagMillis = 0;
+    private double disturbanceMaxCost = 6000;
+    private double disturbanceFallbackSeconds = 2;
     // END GENERATED FIELDS
 
     public String[] getSandBlocks() {
@@ -688,6 +784,7 @@ public class WormsOfArrakisConfig {
     public boolean isDebugChat() {
         return debugChat;
     }
+
 
 
 
@@ -1020,6 +1117,70 @@ public class WormsOfArrakisConfig {
 
     public double getSinkDecayMax() {
         return sinkDecayMax;
+    }
+
+    public boolean isDisturbanceEnabled() {
+        return disturbanceEnabled;
+    }
+
+    public double getDisturbanceSeconds() {
+        return disturbanceSeconds;
+    }
+
+    public double getDisturbanceSwallowLead() {
+        return disturbanceSwallowLead;
+    }
+
+    public double getDisturbanceBoomLead() {
+        return disturbanceBoomLead;
+    }
+
+    public double getDisturbancePulseSeconds() {
+        return disturbancePulseSeconds;
+    }
+
+    public double getDisturbanceIncrementStart() {
+        return disturbanceIncrementStart;
+    }
+
+    public double getDisturbanceIncrementEnd() {
+        return disturbanceIncrementEnd;
+    }
+
+    public double getDisturbanceMaxEditsPerTick() {
+        return disturbanceMaxEditsPerTick;
+    }
+
+    public double getDisturbanceViewDistance() {
+        return disturbanceViewDistance;
+    }
+
+    public double getDisturbanceDustScale() {
+        return disturbanceDustScale;
+    }
+
+    public double getDisturbanceMaxBursts() {
+        return disturbanceMaxBursts;
+    }
+
+    public boolean isDisturbanceCreativeTriggers() {
+        return disturbanceCreativeTriggers;
+    }
+
+    public boolean isDisturbanceLagFallback() {
+        return disturbanceLagFallback;
+    }
+
+    public double getDisturbanceLagMillis() {
+        return disturbanceLagMillis;
+    }
+
+    public double getDisturbanceMaxCost() {
+        return disturbanceMaxCost;
+    }
+
+    public double getDisturbanceFallbackSeconds() {
+        return disturbanceFallbackSeconds;
     }
     // END GENERATED GETTERS
 }

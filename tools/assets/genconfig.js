@@ -80,6 +80,23 @@ const rows = [
   ['SinkReboundMax','double',0.88,'The first rebound peak is at most this fraction of the depth.'],
   ['SinkDecayMin','double',0.55,'Each later swing is at least this fraction of the one before.'],
   ['SinkDecayMax','double',0.85,'Each later swing is at most this fraction of the one before.'],
+  ["DisturbanceEnabled","boolean",true,"Placing a block on Arrakis_Sand starts a rumble in that chunk, and the worm takes what was placed. False turns it all off."],
+  ["DisturbanceSeconds","double",10,"Seconds from the first placement to the end of the disturbance, when the held players are killed."],
+  ["DisturbanceSwallowLead","double",1.0,"Seconds before the end that everyone standing on Arrakis_Sand or a placed block in the chunk is held (decided once, then)."],
+  ["DisturbanceBoomLead","double",0.5,"Seconds after the capture that the dust and the boom come, every placed block is removed and the held players start to sink."],
+  ["DisturbancePulseSeconds","double",1.2,"Each sand column starts one pulse at a random moment within every period of this length."],
+  ["DisturbanceIncrementStart","double",1,"Pixels of the first drop of a pulse at the centre of the placed blocks, at the start of the disturbance."],
+  ["DisturbanceIncrementEnd","double",3,"The same at the end of the disturbance; it rises in between."],
+  ["DisturbanceMaxEditsPerTick","double",600,"Most fake block edits sent in one tick (a moving column is two edits); the rest wait for the next ticks."],
+  ["DisturbanceViewDistance","double",128,"Blocks from the chunk centre. Players this close see the sand rumble."],
+  ["DisturbanceDustScale","double",6,"Particle scale of the dust when the worm takes the blocks (the same default as BreachDustScale)."],
+  ["DisturbanceMaxBursts","double",64,"Most dust bursts at placed block positions when they vanish; more positions are sampled."],
+  ["DisturbanceCreativeTriggers","boolean",true,"Blocks placed by Creative players start a disturbance and are tracked (a Creative player is never killed)."],
+  ["DisturbanceLagFallback","boolean",true,"Drop the rumble visuals and shorten the event when the server is lagging. False turns the check off."],
+  ["DisturbanceLagMillis","double",0,"Milliseconds. The fallback is used if the average time between ticks over the last two seconds is above this. 0 means 1.5 times the normal tick length."],
+  ["DisturbanceMaxCost","double",6000,"The fallback is also used if columns times viewers is above this (a full chunk is 1024 columns)."],
+  ["DisturbanceFallbackSeconds","double",2.0,"In the fallback the event ends this many seconds after it started (or at once if that is past)."],
+
 ];
 const camel = (n) => n[0].toLowerCase() + n.slice(1);
 const jt = { double: 'double', boolean: 'boolean', string: 'String' };

@@ -56,7 +56,7 @@ final class SinkJob implements WormTestSystem.Job {
     }
 
     /** Which job last claimed a column, so the newer ripple wins where two overlap. */
-    private static final Map<World, Map<Long, SinkJob>> CLAIMS = new HashMap<>();
+    static final Map<World, Map<Long, Object>> CLAIMS = new HashMap<>();
 
     private final World world;
     private final UUID owner;
@@ -113,19 +113,15 @@ final class SinkJob implements WormTestSystem.Job {
         if (!missingAssets().isEmpty()) {
             return null;
         }
-        int[] sunk = new int[SinkSchedule.MAX_PX + 1];
-        int[] layer = new int[SinkSchedule.MAX_PX + 1];
-        for (int n = 1; n <= SinkSchedule.MAX_PX; n++) {
-            sunk[n] = BlockType.getAssetMap().getIndex("Arrakis_Worm_Sunk_" + n);
-            layer[n] = BlockType.getAssetMap().getIndex("Arrakis_Worm_Ripple_Layer_" + n);
-        }
+        int[] sunk = blockIds("Arrakis_Worm_Sunk_");
+        int[] layer = blockIds("Arrakis_Worm_Ripple_Layer_");
         long seed = options.seed != null ? options.seed : new java.util.Random().nextLong();
         SinkSchedule schedule = new SinkSchedule(params, seed);
         int cx = (int) Math.floor(at.x);
         int cz = (int) Math.floor(at.z);
         Vector3d centreCell = new Vector3d(cx + 0.5, at.y, cz + 0.5);
         SinkJob job = new SinkJob(world, viewers, options, schedule, centreCell, sunk, layer, shake);
-        Map<Long, SinkJob> claims = CLAIMS.computeIfAbsent(world, w -> new HashMap<>());
+        Map<Long, Object> claims = CLAIMS.computeIfAbsent(world, w -> new HashMap<>());
         for (SinkSchedule.Cell plan : schedule.cells) {
             int x = cx + plan.dx;
             int z = cz + plan.dz;
@@ -145,8 +141,26 @@ final class SinkJob implements WormTestSystem.Job {
         return job;
     }
 
-    private static long key(int x, int z) {
+    static long key(int x, int z) {
         return ((long) x & 0xFFFFFFFFL) << 32 | ((long) z & 0xFFFFFFFFL);
+    }
+
+    /** Numeric ids of Arrakis_Worm_Sunk_n or Arrakis_Worm_Ripple_Layer_n, indexed by n (1 to MAX_PX). */
+    static int[] blockIds(String prefix) {
+        int[] ids = new int[SinkSchedule.MAX_PX + 1];
+        for (int n = 1; n <= SinkSchedule.MAX_PX; n++) {
+            ids[n] = BlockType.getAssetMap().getIndex(prefix + n);
+        }
+        return ids;
+    }
+
+    /**
+     * The two edits of one column at an offset in pixels: the surface shows the sunk block or the real one, the cell
+     * above a thin layer or air.
+     */
+    static void addEdits(List<FakeBlockSender.Edit> edits, int x, int y, int z, int offset, int[] sunkIds, int[] layerIds) {
+        edits.add(new FakeBlockSender.Edit(x, y, z, offset < 0 ? sunkIds[-offset] : FakeBlockSender.REAL));
+        edits.add(new FakeBlockSender.Edit(x, y + 1, z, offset > 0 ? layerIds[offset] : FakeBlockSender.REAL));
     }
 
     int cellCount() {
@@ -176,7 +190,7 @@ final class SinkJob implements WormTestSystem.Job {
     public boolean tick(float dt, Store<EntityStore> store) {
         long t0 = System.nanoTime();
         elapsed += dt;
-        Map<Long, SinkJob> claims = CLAIMS.get(world);
+        Map<Long, Object> claims = CLAIMS.get(world);
         List<FakeBlockSender.Edit> edits = new ArrayList<>();
         for (Cell cell : cells) {
             int o = clamp(schedule.offsetAt(cell.plan, elapsed));
@@ -188,9 +202,8 @@ final class SinkJob implements WormTestSystem.Job {
                 continue; // A newer ripple draws this column.
             }
             cell.dirty = true;
-            // Both cells in one packet. The surface shows the sunk block or the real one, the cell above a layer or air.
-            edits.add(new FakeBlockSender.Edit(cell.x, cell.y, cell.z, o < 0 ? sunkIds[-o] : FakeBlockSender.REAL));
-            edits.add(new FakeBlockSender.Edit(cell.x, cell.y + 1, cell.z, o > 0 ? layerIds[o] : FakeBlockSender.REAL));
+            // Both cells in one packet.
+            addEdits(edits, cell.x, cell.y, cell.z, o, sunkIds, layerIds);
         }
         peakEdits = Math.max(peakEdits, edits.size());
         long bytesBefore = sender.bytes;
@@ -250,7 +263,7 @@ final class SinkJob implements WormTestSystem.Job {
     /** Puts the real blocks back in every column this job changed and still owns. */
     @Override
     public void abort(Store<EntityStore> store) {
-        Map<Long, SinkJob> claims = CLAIMS.get(world);
+        Map<Long, Object> claims = CLAIMS.get(world);
         List<FakeBlockSender.Edit> edits = new ArrayList<>();
         for (Cell cell : cells) {
             long k = key(cell.x, cell.z);

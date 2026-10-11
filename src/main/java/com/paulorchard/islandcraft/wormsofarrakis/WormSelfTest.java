@@ -185,6 +185,7 @@ final class WormSelfTest extends AbstractWorldCommand {
         }
         breach.abort(store);
         say(context, "breach: ran " + breachTicks + " ticks (" + String.format(java.util.Locale.ROOT, "%.1f", breachTicks / 30.0) + " s), worm removed. OK");
+        DisturbanceSelfTest.run(text -> say(context, text), world, store, spot);
         say(context, "selftest finished: all checks passed");
     }
 

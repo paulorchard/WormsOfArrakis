@@ -2,6 +2,7 @@ package com.paulorchard.islandcraft.wormsofarrakis;
 
 import com.hypixel.hytale.component.Ref;
 import com.hypixel.hytale.component.Store;
+import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.server.core.Message;
 import com.hypixel.hytale.server.core.NameMatching;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
@@ -10,6 +11,8 @@ import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
+
+import org.joml.Vector3d;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,15 +33,17 @@ public class WormCommand extends AbstractCommandCollection {
     private final Supplier<WormsOfArrakisConfig> config;
     private final WormEffects effects;
     private final WormTestSystem jobs;
+    private final DisturbanceManager disturbances;
     private final WormEvents events = WormEvents.get();
 
     public WormCommand(AggroManager manager, Supplier<WormsOfArrakisConfig> config, WormEffects effects,
-                       WormTestSystem jobs) {
+                       WormTestSystem jobs, DisturbanceManager disturbances) {
         super("worm", LANG + "desc");
         this.manager = manager;
         this.config = config;
         this.effects = effects;
         this.jobs = jobs;
+        this.disturbances = disturbances;
         addSubCommand(WorldPositional.build("status", LANG + "status.desc", this::status));
         addSubCommand(WorldPositional.build("aggro", LANG + "aggro.desc", this::aggro, "player"));
         addSubCommand(WorldPositional.build("add", LANG + "add.desc", this::add, "player", "amount"));
@@ -47,6 +52,7 @@ public class WormCommand extends AbstractCommandCollection {
         addSubCommand(WorldPositional.build("preview", LANG + "preview.desc", this::preview, "effect", "seconds"));
         addSubCommand(WorldPositional.build("breach", LANG + "breach.desc", this::breach, "target"));
         addSubCommand(WorldPositional.build("sink", LANG + "sink.desc", this::sink, "wait", "depth", "delay"));
+        addSubCommand(WorldPositional.build("disturb", LANG + "disturb.desc", this::disturb, "action", "arg"));
         addSubCommand(WorldPositional.build("stop", LANG + "stop.desc", this::stop, "player"));
         addSubCommand(WorldPositional.build("ignore", LANG + "ignore.desc", this::ignore, "player"));
     }
@@ -265,6 +271,65 @@ public class WormCommand extends AbstractCommandCollection {
         jobs.stop(self.getUuid(), "sinktest");
         jobs.add(new SinkTestJob(world, self, config, depth, Math.max(0, wait), Math.max(0, delay)));
         say(context, "sink.start", "wait", num(wait), "depth", num(depth), "delay", num(delay));
+    }
+
+    /** /worm disturb [here] | status | stop [here|all] | fallback on|off: the sand disturbance (see SandDisturbance). */
+    private void disturb(CommandContext context, World world, Store<EntityStore> store, String[] args) {
+        String action = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : "here";
+        String arg = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "";
+        switch (action) {
+            case "here" -> {
+                PlayerRef self = caller(context, store);
+                if (self == null) {
+                    say(context, "needPlayer");
+                    return;
+                }
+                if (WormsOfArrakisPlugin.get().arrakisSandId() == WormsOfArrakisPlugin.NOT_INSTALLED) {
+                    say(context, "disturb.noDunes");
+                    return;
+                }
+                Vector3d at = WormEffects.position(store, self);
+                int cx = ChunkUtil.chunkCoordinate((int) Math.floor(at.x));
+                int cz = ChunkUtil.chunkCoordinate((int) Math.floor(at.z));
+                SandDisturbance d = disturbances.startIn(world, store, cx, cz);
+                say(context, d == null ? "disturb.busy" : "disturb.started", "chunk", cx + "," + cz);
+            }
+            case "status" -> {
+                List<String> lines = disturbances.status();
+                if (lines.isEmpty()) {
+                    say(context, "disturb.none");
+                }
+                for (String line : lines) {
+                    say(context, "disturb.line", "line", line);
+                }
+                say(context, "disturb.forced", "state", disturbances.isForced() ? "on" : "off");
+            }
+            case "stop" -> {
+                int n;
+                if (arg.equals("all")) {
+                    n = disturbances.stop(null, null, null, "/worm disturb stop all");
+                } else {
+                    PlayerRef self = caller(context, store);
+                    Vector3d at = self == null ? null : WormEffects.position(store, self);
+                    if (at == null) {
+                        say(context, "needPlayer");
+                        return;
+                    }
+                    n = disturbances.stop(world, ChunkUtil.chunkCoordinate((int) Math.floor(at.x)),
+                            ChunkUtil.chunkCoordinate((int) Math.floor(at.z)), "/worm disturb stop");
+                }
+                say(context, "disturb.stopped", "count", String.valueOf(n));
+            }
+            case "fallback" -> {
+                if (!arg.equals("on") && !arg.equals("off")) {
+                    say(context, "disturb.usage");
+                    return;
+                }
+                disturbances.setForced(arg.equals("on"));
+                say(context, "disturb.forced", "state", arg);
+            }
+            default -> say(context, "disturb.usage");
+        }
     }
 
     private static double parse(String text, double fallback) {
