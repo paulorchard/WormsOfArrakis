@@ -12,24 +12,26 @@ import com.hypixel.hytale.server.core.modules.entity.component.TransformComponen
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.Universe;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import org.joml.Vector3d;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Supplier;
 
 /**
- * Everything the players see and hear before the worm arrives, driven by the prompt 18 hooks: wormsign for anyone
- * near the worm, the rumble for everyone near the target, and for the target alone the ripple, the vignette, the
- * camera shake and the slowdown. Prompt 20 adds the breach on top.
+ * Everything the listed beings see and hear before the worm arrives, driven by the event hooks. In STALKING: the rumble
+ * for everyone near, and every few seconds a ripple, a stumble and a small shake for each listed being on sand. In
+ * LOCKED, for the target alone: the ripple, the vignette, the shake build-up, the slowdown and the camera zoom. The breach
+ * itself is {@link BreachJob}.
  */
 final class WormEffects implements WormEventListener {
 
@@ -39,28 +41,31 @@ final class WormEffects implements WormEventListener {
 
     /** What one event has done so far: timers for the repeating effects. */
     private static final class State {
-        Vector3d lastTrail;
-        double trail;
-        double puff;
         double rumble = 1e9;
         double ripple;
         /** Sink ripples of LOCKED that may still be running (at most two at once). */
         final List<SinkRipple.Handle> locked = new ArrayList<>();
-        /** How long the last STALKING ripple takes: the next one starts no sooner than a quarter of it. */
-        double lastRippleSeconds;
         double shake;
-        final Map<UUID, Double> passed = new HashMap<>();
+        /** Seconds until each listed being's next pulse; the first is a random offset within one pulse period. */
+        final Map<UUID, Double> pulse = new HashMap<>();
         double clock;
+        /** A mob target of LOCKED has been slowed / held. */
+        boolean mobSlow;
+        boolean mobHold;
     }
 
     private final Supplier<WormsOfArrakisConfig> config;
     private final Supplier<Set<Integer>> sand;
     private final WormTestSystem jobs;
+    private final StumbleFx stumbles = new StumbleFx();
     private final Map<Integer, State> states = new ConcurrentHashMap<>();
     private final Map<UUID, TargetFx> fx = new ConcurrentHashMap<>();
     /** Targets whose pulled-out camera the breach has let go (BreachCameraReturnAt): TargetFx eases them back. */
     private final Set<UUID> zoomReleased = ConcurrentHashMap.newKeySet();
+    private volatile AggroCore core;
     private volatile double dt = 1.0 / 30;
+    /** Stalk pulses played since the plugin started (read by the self-test). */
+    volatile int pulseCount;
 
     WormEffects(Supplier<WormsOfArrakisConfig> config, Supplier<Set<Integer>> sand, WormTestSystem jobs) {
         this.config = config;
@@ -68,8 +73,17 @@ final class WormEffects implements WormEventListener {
         this.jobs = jobs;
     }
 
+    /** Where the effects find a being's position and whether it stands on sand. */
+    void setCore(AggroCore core) {
+        this.core = core;
+    }
+
     void setDt(double dt) {
         this.dt = dt;
+    }
+
+    AggroCore core() {
+        return core;
     }
 
     void releaseZoom(UUID target) {
@@ -86,6 +100,7 @@ final class WormEffects implements WormEventListener {
 
     /** The per-player fades, once per world tick after the events have run. */
     void tick(World world, Store<EntityStore> store, double dt) {
+        stumbles.tick(world.getName(), store, dt);
         for (Iterator<TargetFx> it = fx.values().iterator(); it.hasNext(); ) {
             TargetFx f = it.next();
             Ref<EntityStore> ref = f.player.getReference();
@@ -107,9 +122,10 @@ final class WormEffects implements WormEventListener {
     /** A client that is gone needs nothing restored. */
     void forget(UUID player) {
         fx.remove(player);
+        stumbles.forget(player);
     }
 
-    /** Takes back every vignette and slowdown at once (server stop, plugin shutdown, /worm stop). */
+    /** Takes back every vignette, slowdown and stumble at once (server stop, plugin shutdown, /worm stop). */
     void restoreAll() {
         for (TargetFx f : fx.values()) {
             Ref<EntityStore> ref = f.player.getReference();
@@ -121,6 +137,7 @@ final class WormEffects implements WormEventListener {
             }
         }
         fx.clear();
+        stumbles.restoreAll();
         states.clear();
     }
 
@@ -131,7 +148,7 @@ final class WormEffects implements WormEventListener {
         if (old == null) {
             World startWorld = Universe.get().getWorld(event.getWorldName());
             if (startWorld != null) {
-                WormStartFx.play(startWorld, startWorld.getEntityStore().getStore(), event, config.get(), jobs, sand.get());
+                WormStartFx.play(startWorld, startWorld.getEntityStore().getStore(), event, config.get(), jobs, sand.get(), core);
             }
         }
         if (now != WormPhase.BREACH || event.getTarget() == null) {
@@ -141,7 +158,27 @@ final class WormEffects implements WormEventListener {
         PlayerRef target = Universe.get().getPlayer(event.getTarget());
         if (world != null && target != null) {
             startBreach(world, world.getEntityStore().getStore(), target, target, event.getSecondsLeft());
+        } else if (world != null) {
+            startEntityBreach(world, world.getEntityStore().getStore(), event);
         }
+    }
+
+    /**
+     * The breach for a mob or a totem target: at where it stands, or, if it has died, despawned or been removed, at the
+     * last place it was seen. There is no victim; the swallow zone catches whoever is in it, the entity included.
+     */
+    private void startEntityBreach(World world, Store<EntityStore> store, WormEvent event) {
+        UUID id = event.getTarget();
+        BeingAggro b = being(id);
+        Vector3d p = b != null && b.entity != null && b.entity.isValid() ? b.position : event.getLastTargetPosition();
+        if (p == null || (p.x == 0 && p.y == 0 && p.z == 0)) {
+            p = event.getOrigin();
+        }
+        double a = ThreadLocalRandom.current().nextDouble(Math.PI * 2);
+        Vector3d heading = new Vector3d(Math.cos(a), 0, Math.sin(a));
+        Vector3d centre = new Vector3d(p.x, surfaceY(world, p.x, p.z, p.y), p.z);
+        jobs.stop(id, "breach");
+        jobs.add(new BreachJob(this, world, id, null, null, centre, heading, event.getSecondsLeft(), config).forEntity(id));
     }
 
     /**
@@ -166,26 +203,26 @@ final class WormEffects implements WormEventListener {
     }
 
     @Override
-    public void onRetarget(WormEvent event, UUID oldTarget, UUID newTarget) {
-        PlayerRef old = Universe.get().getPlayer(oldTarget);
-        if (old != null) {
-            fxOf(old).fadeOut();
-        }
-        State s = states.get(event.getId());
-        if (s != null) {
-            s.ripple = 0;
-            s.shake = 0;
-            s.rumble = 1e9; // the new target hears it at once
-        }
-    }
-
-    @Override
     public void onEnd(WormEvent event, WormEndReason reason) {
         states.remove(event.getId());
-        for (UUID id : event.getGroup()) {
+        Set<UUID> everyone = new HashSet<>(event.getList());
+        if (event.getTarget() != null) {
+            everyone.add(event.getTarget());
+        }
+        for (UUID id : everyone) {
             TargetFx f = fx.get(id);
             if (f != null) {
                 f.fadeOut();
+            }
+        }
+        for (UUID id : everyone) {
+            BeingAggro b = being(id);
+            if (b != null && b.kind == BeingKind.MOB && b.entity != null && b.entity.isValid()) {
+                // A mob slowed or held for the lock is let go when the event ends (the breach releases its own).
+                World w = Universe.get().getWorld(event.getWorldName());
+                if (w != null && reason == WormEndReason.STOPPED) {
+                    BreachEntities.unhold(w.getEntityStore().getStore(), b.entity);
+                }
             }
         }
         if (reason == WormEndReason.STOPPED) {
@@ -193,7 +230,8 @@ final class WormEffects implements WormEventListener {
                 jobs.stop(event.getTarget(), "breach");
                 jobs.stop(event.getTarget(), "sink");
             }
-            for (UUID id : event.getGroup()) {
+            for (UUID id : everyone) {
+                stumbles.restore(id);
                 TargetFx f = fx.remove(id);
                 if (f != null) {
                     World w = Universe.get().getWorld(f.player.getWorldUuid());
@@ -208,69 +246,69 @@ final class WormEffects implements WormEventListener {
     @Override
     public void onTick(WormEvent event) {
         WormPhase phase = event.getPhase();
-        if (phase != WormPhase.STALKING && phase != WormPhase.LOCKED && phase != WormPhase.BREACH) {
-            return;
-        }
         World world = Universe.get().getWorld(event.getWorldName());
-        PlayerRef target = event.getTarget() == null ? null : Universe.get().getPlayer(event.getTarget());
-        if (world == null || target == null) {
+        if (world == null) {
             return;
         }
         WormsOfArrakisConfig cfg = config.get();
         Store<EntityStore> store = world.getEntityStore().getStore();
         State s = states.computeIfAbsent(event.getId(), k -> new State());
         s.clock += dt;
-        Vector3d worm = event.getWormPosition();
-        Vector3d targetPos = position(store, target);
-        if (targetPos == null) {
-            return;
-        }
-        double stalk = event.getStalkSeconds();
-        double lock = event.getLockSeconds();
         double left = event.getSecondsLeft();
-        // Progress through the whole approach, 0 at the start of STALKING and 1 at the start of LOCKED, and then
-        // seconds into LOCKED.
-        double stalkProgress = phase == WormPhase.STALKING ? clamp01(1 - left / Math.max(stalk, 0.001)) : 1;
-        double lockedFor = phase == WormPhase.LOCKED ? lock - left : phase == WormPhase.BREACH ? lock : 0;
-
-        if (phase != WormPhase.BREACH) {
-            wormsign(world, store, s, worm, cfg);
-            rumble(world, store, s, target, targetPos, stalkProgress, cfg);
-            ripples(world, store, s, target, targetPos, phase, left, cfg);
-            passPulse(store, s, target, worm, cfg);
-        }
-        targetEffects(store, s, target, phase, stalk, left, lock, lockedFor, cfg);
-    }
-
-    // ------------------------------------------------------------------ wormsign
-
-    private void wormsign(World world, Store<EntityStore> store, State s, Vector3d worm, WormsOfArrakisConfig cfg) {
-        s.trail += dt;
-        s.puff += dt;
-        if (s.trail < cfg.getWormsignTrailInterval()) {
+        if (phase == WormPhase.STALKING) {
+            double stalkProgress = clamp01(1 - left / Math.max(event.getStalkSeconds(), 0.001));
+            rumble(world, store, s, event, stalkProgress, cfg);
+            pulses(world, store, s, event, cfg);
             return;
         }
-        s.trail = 0;
-        List<PlayerRef> viewers = near(world, store, worm, cfg.getWormsignViewDistance(), null);
-        Vector3d previous = s.lastTrail;
-        s.lastTrail = new Vector3d(worm);
-        if (viewers.isEmpty() || !emitSurface(world, worm)) {
+        if (phase == WormPhase.LOCKED) {
+            rumble(world, store, s, event, 1.0, cfg);
+        }
+        PlayerRef target = event.getTarget() == null ? null : Universe.get().getPlayer(event.getTarget());
+        Vector3d targetPos = target == null ? null : position(store, target);
+        if (target == null && phase == WormPhase.LOCKED) {
+            mobTarget(world, store, s, event, cfg);
+        }
+        if (target == null || targetPos == null) {
             return;
         }
-        boolean puff = s.puff >= cfg.getWormsignPuffInterval();
-        if (puff) {
-            s.puff = 0;
+        double lock = event.getLockSeconds();
+        double lockedFor = phase == WormPhase.LOCKED ? lock - left : lock;
+        if (phase == WormPhase.LOCKED) {
+            lockedRipples(world, store, s, target, targetPos, cfg);
         }
-        trail(world, store, previous, worm, viewers, puff, cfg);
+        targetEffects(s, target, phase, left, lock, lockedFor, cfg);
     }
 
-    /** True if the worm is over loaded sand; over rock or buildings the worm passes under without showing. */
-    private boolean emitSurface(World world, Vector3d p) {
-        Boolean sandy = AggroManager.surfaceIsSand(world, p.x, p.z, sand.get());
-        return sandy != null && sandy;
+    /**
+     * A mob that is the target of LOCKED is slowed to SlowFloor for the whole lock and held for the second half: the
+     * effects that make sense for it (no vignette, zoom or camera). A totem is an object and gets nothing.
+     */
+    private void mobTarget(World world, Store<EntityStore> store, State s, WormEvent event, WormsOfArrakisConfig cfg) {
+        BeingAggro b = being(event.getTarget());
+        if (b == null || b.kind != BeingKind.MOB || b.entity == null || !b.entity.isValid()) {
+            return;
+        }
+        double lock = event.getLockSeconds();
+        if (!s.mobSlow) {
+            s.mobSlow = true;
+            stumbles.stumble(world, store, b.id, b.entity, lock, cfg.getSlowFloor() * 100);
+        }
+        if (!s.mobHold && lock - event.getSecondsLeft() >= lock * 0.5) {
+            s.mobHold = true;
+            BreachEntities.hold(store, b.entity, (float) (lock * 0.5 + 1));
+        }
     }
 
-    /** A low wide trail of dust along the way the worm came, and now and then a puff of sand thrown up. */
+    // ------------------------------------------------------------------ position and sand of a being
+
+    private BeingAggro being(UUID id) {
+        return core == null ? null : core.being(id);
+    }
+
+    // ------------------------------------------------------------------ trail (the breach's departure)
+
+    /** A low wide trail of dust along the way the worm went, and now and then a puff of sand thrown up. Used by the breach. */
     void trail(World world, Store<EntityStore> store, Vector3d from, Vector3d to, List<PlayerRef> viewers,
                boolean puff, WormsOfArrakisConfig cfg) {
         float scale = (float) cfg.getWormsignScale();
@@ -293,9 +331,8 @@ final class WormEffects implements WormEventListener {
     }
 
     private static double surfaceY(World world, double x, double z, double fallback) {
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
-        return chunk == null ? fallback : chunk.getHeight((int) Math.floor(x) & ChunkUtil.SIZE_MASK,
-                (int) Math.floor(z) & ChunkUtil.SIZE_MASK) + 1.0;
+        int ground = WorldAccess.groundHeight(world, x, z);
+        return ground == WorldAccess.NO_HEIGHT ? fallback : ground + 1.0;
     }
 
     static void particle(Store<EntityStore> store, String system, double x, double y, double z, float scale,
@@ -307,24 +344,31 @@ final class WormEffects implements WormEventListener {
     // ------------------------------------------------------------------ rumble
 
     /**
-     * Everyone near the target hears the rumble at a flat volume; the target hears it rise as the worm comes.
-     * One-shot sounds played again every few seconds, per player, so there is no distance falloff.
+     * Everyone in the list hears the rumble rise (louder and lower) as the stalk goes on; other players within the group
+     * radius of the trigger hear it at a flat volume. One-shot sounds played again every few seconds, per player, so
+     * there is no distance falloff.
      */
-    private void rumble(World world, Store<EntityStore> store, State s, PlayerRef target, Vector3d targetPos,
-                        double progress, WormsOfArrakisConfig cfg) {
+    private void rumble(World world, Store<EntityStore> store, State s, WormEvent event, double progress,
+                        WormsOfArrakisConfig cfg) {
         s.rumble += dt;
         if (s.rumble < cfg.getRumbleIntervalSeconds()) {
             return;
         }
         s.rumble = 0;
-        double groupRadius = cfg.getGroupRadius();
-        for (PlayerRef p : near(world, store, targetPos, groupRadius, null)) {
-            if (p.getUuid().equals(target.getUuid())) {
-                float volume = (float) lerp(cfg.getRumbleTargetStartVolume(), cfg.getRumbleTargetVolume(), progress);
-                float pitch = (float) lerp(1.0, cfg.getRumbleTargetEndPitch(), progress);
-                playRumble(p, volume, pitch);
-            } else {
+        BeingAggro trigger = being(event.getTrigger());
+        Vector3d centre = trigger != null && trigger.eligible ? trigger.position : event.getOrigin();
+        Set<UUID> listed = new HashSet<>(event.getList());
+        float volume = (float) lerp(cfg.getRumbleTargetStartVolume(), cfg.getRumbleTargetVolume(), progress);
+        float pitch = (float) lerp(1.0, cfg.getRumbleTargetEndPitch(), progress);
+        for (PlayerRef p : near(world, store, centre, cfg.getGroupRadius(), null)) {
+            if (!listed.contains(p.getUuid())) {
                 playRumble(p, (float) cfg.getRumbleBystanderVolume(), 1.0f);
+            }
+        }
+        for (UUID id : listed) {
+            BeingAggro b = being(id);
+            if (b != null && b.ref != null) {
+                playRumble(b.ref, volume, pitch);
             }
         }
     }
@@ -335,39 +379,58 @@ final class WormEffects implements WormEventListener {
         }
     }
 
-    // ------------------------------------------------------------------ ripple
+    // ------------------------------------------------------------------ the stalk pulse
 
     /**
-     * The sink-and-rebound ripple under the target: STALKING in the last RippleSeconds at the eased interval (but never
-     * sooner than a quarter of the last one's length), and in LOCKED back to back with at most two running.
+     * Every StalkPulseSeconds each listed being standing on sand gets a sink-and-rebound ripple under its feet, a small
+     * camera shake (players) and a stumble. Each being has its own random start offset so they do not all stumble together.
      */
-    private void ripples(World world, Store<EntityStore> store, State s, PlayerRef target, Vector3d targetPos,
-                         WormPhase phase, double left, WormsOfArrakisConfig cfg) {
+    private void pulses(World world, Store<EntityStore> store, State s, WormEvent event, WormsOfArrakisConfig cfg) {
+        double period = Math.max(cfg.getStalkPulseSeconds(), 0.1);
+        for (UUID id : event.getList()) {
+            double left = s.pulse.computeIfAbsent(id, k -> ThreadLocalRandom.current().nextDouble() * period) - dt;
+            if (left > 0) {
+                s.pulse.put(id, left);
+                continue;
+            }
+            s.pulse.put(id, left + period);
+            BeingAggro b = being(id);
+            if (b == null || !b.eligible || !b.onSand || b.position == null) {
+                continue; // a being off the sand gets no pulse
+            }
+            Vector3d at = new Vector3d(b.position);
+            pulseCount++;
+            sink(world, store, id, at, 2, null, false, cfg.getRippleViewDistance(), b.ref);
+            if (b.ref != null && cfg.isCameraShake()) {
+                shake(b.ref, "Arrakis_Worm_Tremble", cfg.getShakeStrength() * 0.4);
+            }
+            if (b.kind != BeingKind.TOTEM) { // a totem is an object: the ripple, but no stumble
+                stumbles.stumble(world, store, id, b.entity, cfg.getStumbleSeconds(), cfg.getStumbleSlowPercent());
+            }
+        }
+        s.pulse.keySet().retainAll(event.getList());
+    }
+
+    /** One stumble, with the configured length and strength (for /worm preview stumble). */
+    void stumble(World world, Store<EntityStore> store, UUID id, Ref<EntityStore> ref) {
+        WormsOfArrakisConfig cfg = config.get();
+        stumbles.stumble(world, store, id, ref, cfg.getStumbleSeconds(), cfg.getStumbleSlowPercent());
+    }
+
+    // ------------------------------------------------------------------ ripple (LOCKED)
+
+    /** In LOCKED the sink-and-rebound ripple under the target, back to back with at most two running. */
+    private void lockedRipples(World world, Store<EntityStore> store, State s, PlayerRef target, Vector3d targetPos,
+                               WormsOfArrakisConfig cfg) {
         s.ripple += dt;
-        if (phase == WormPhase.LOCKED) {
-            s.locked.removeIf(h -> !h.running());
-            if (s.ripple < cfg.getLockedRippleInterval() || s.locked.size() >= 2) {
-                return;
-            }
-            s.ripple = 0;
-            SinkRipple.Handle h = sink(world, store, target.getUuid(), targetPos, 3, 2, false, cfg.getRippleViewDistance(), target);
-            if (h != null) {
-                s.locked.add(h);
-            }
-            return;
-        }
-        if (left > cfg.getRippleSeconds()) {
-            return;
-        }
-        double q = clamp01(1 - left / Math.max(cfg.getRippleSeconds(), 0.001));
-        double interval = Math.max(lerp(cfg.getRippleStartInterval(), cfg.getRippleEndInterval(), q), 0.25 * s.lastRippleSeconds);
-        if (s.ripple < interval) {
+        s.locked.removeIf(h -> !h.running());
+        if (s.ripple < cfg.getLockedRippleInterval() || s.locked.size() >= 2) {
             return;
         }
         s.ripple = 0;
-        SinkRipple.Handle h = sink(world, store, target.getUuid(), targetPos, 2, null, false, cfg.getRippleViewDistance(), target);
+        SinkRipple.Handle h = sink(world, store, target.getUuid(), targetPos, 3, 2, false, cfg.getRippleViewDistance(), target);
         if (h != null) {
-            s.lastRippleSeconds = h.seconds();
+            s.locked.add(h);
         }
     }
 
@@ -385,22 +448,17 @@ final class WormEffects implements WormEventListener {
         return SinkRipple.play(world, at, increment, options, viewers);
     }
 
-    // ------------------------------------------------------------------ the target only
+    // ------------------------------------------------------------------ the target only (LOCKED and BREACH)
 
-    private void targetEffects(Store<EntityStore> store, State s, PlayerRef target, WormPhase phase, double stalk,
-                               double left, double lock, double lockedFor, WormsOfArrakisConfig cfg) {
-        double vignette = 0;
-        double slow = 1.0;
-        double window = Math.min(cfg.getVignetteSeconds(), Math.max(stalk, 0.001));
-        if (phase == WormPhase.STALKING) {
-            if (left <= window) {
-                vignette = cfg.getVignetteStalkLevel() * clamp01(1 - left / window);
-            }
-        } else {
-            double q = phase == WormPhase.BREACH ? 1 : clamp01(lockedFor / Math.max(lock, 0.001));
-            vignette = lerp(cfg.getVignetteStalkLevel(), 1.0, q);
-            slow = lerp(1.0, cfg.getSlowFloor(), q);
-        }
+    /**
+     * From the start of LOCKED the target is slowed progressively to SlowFloor, gets the vignette rising to full, the
+     * shake and, in the last ZoomSeconds, the camera pulled out. In BREACH it is all at full.
+     */
+    private void targetEffects(State s, PlayerRef target, WormPhase phase, double left, double lock, double lockedFor,
+                               WormsOfArrakisConfig cfg) {
+        double q = phase == WormPhase.BREACH ? 1 : clamp01(lockedFor / Math.max(lock, 0.001));
+        double vignette = q;
+        double slow = lerp(1.0, cfg.getSlowFloor(), q);
         TargetFx targetFx = fxOf(target);
         targetFx.want(vignette, slow);
         double zoom = 0;
@@ -412,24 +470,21 @@ final class WormEffects implements WormEventListener {
         }
         targetFx.wantZoom(zoom);
 
-        if (cfg.isCameraShake()) {
-            shake(s, target, phase, left, cfg);
+        if (cfg.isCameraShake() && phase == WormPhase.LOCKED) {
+            shake(s, target, q, cfg);
         }
     }
 
-    /** A faint tremble from ShakeSeconds out that grows in size and frequency, then strong shakes while LOCKED. */
-    private void shake(State s, PlayerRef target, WormPhase phase, double left, WormsOfArrakisConfig cfg) {
+    /** A tremble that grows in size and frequency over the first half of LOCKED, then strong shakes. */
+    private void shake(State s, PlayerRef target, double q, WormsOfArrakisConfig cfg) {
         s.shake += dt;
-        if (phase == WormPhase.STALKING) {
-            if (left > cfg.getShakeSeconds()) {
-                return;
-            }
-            double q = clamp01(1 - left / Math.max(cfg.getShakeSeconds(), 0.001));
-            if (s.shake >= lerp(2.0, 0.5, q)) {
+        if (q < 0.5) {
+            double r = q / 0.5;
+            if (s.shake >= lerp(1.0, 0.5, r)) {
                 s.shake = 0;
-                shake(target, "Arrakis_Worm_Tremble", cfg.getShakeStrength() * lerp(0.2, 0.6, q));
+                shake(target, "Arrakis_Worm_Tremble", cfg.getShakeStrength() * lerp(0.2, 0.6, r));
             }
-        } else if (phase == WormPhase.LOCKED && s.shake >= 0.4) {
+        } else if (s.shake >= 0.4) {
             s.shake = 0;
             shake(target, "Arrakis_Worm_Lock", cfg.getShakeStrength());
         }
@@ -440,24 +495,6 @@ final class WormEffects implements WormEventListener {
         intensity *= WormsOfArrakisPlugin.get().config().getCameraShakeScale();
         if (index != Integer.MIN_VALUE && intensity > 0) {
             player.getPacketHandler().writeNoCache(new CameraShakeEffect(index, (float) intensity, AccumulationMode.Set));
-        }
-    }
-
-    /** One shake pulse for a bystander the worm passes close to. */
-    private void passPulse(Store<EntityStore> store, State s, PlayerRef target, Vector3d worm, WormsOfArrakisConfig cfg) {
-        if (!cfg.isCameraShake()) {
-            return;
-        }
-        for (PlayerRef p : Universe.get().getPlayers()) {
-            if (p.getUuid().equals(target.getUuid()) || p.getReference() == null || !p.getReference().isValid()) {
-                continue;
-            }
-            Vector3d at = position(store, p);
-            Double last = s.passed.get(p.getUuid());
-            if (at != null && at.distance(worm) <= cfg.getBystanderShakeRange() && (last == null || s.clock - last > 10)) {
-                s.passed.put(p.getUuid(), s.clock);
-                shake(p, "Arrakis_Worm_Pass", cfg.getShakeStrength() * 0.6);
-            }
         }
     }
 

@@ -5,7 +5,6 @@ import com.hypixel.hytale.component.Store;
 import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import org.joml.Vector3d;
 
@@ -15,8 +14,8 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * What happens when an event begins: a boom and a burst of dust where the worm starts, and a moment later a
- * sink-and-rebound ripple under every player near who is standing on sand, as the warning that a worm is about.
+ * What happens when an event begins: a boom and a burst of dust where the trigger being stands, and a moment later a
+ * sink-and-rebound ripple under everyone in the list who is standing on sand, as the warning that a worm is about.
  * The sounds and particles are the breach's own.
  */
 final class WormStartFx {
@@ -28,11 +27,10 @@ final class WormStartFx {
     }
 
     static void play(World world, Store<EntityStore> store, WormEvent event, WormsOfArrakisConfig cfg,
-                     WormTestSystem jobs, Set<Integer> sand) {
-        Vector3d start = event.getWormPosition();
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(start.x, start.z));
-        double surface = chunk == null ? start.y : chunk.getHeight((int) Math.floor(start.x) & ChunkUtil.SIZE_MASK,
-                (int) Math.floor(start.z) & ChunkUtil.SIZE_MASK) + 1.0;
+                     WormTestSystem jobs, Set<Integer> sand, AggroCore core) {
+        Vector3d start = event.getOrigin();
+        int ground = WorldAccess.groundHeight(world, start.x, start.z);
+        double surface = ground == WorldAccess.NO_HEIGHT ? start.y : ground + 1.0;
         Vector3d at = new Vector3d(start.x, surface, start.z);
         List<PlayerRef> hearers = hearers(world, store, event, at, cfg);
         if (hearers.isEmpty()) {
@@ -51,22 +49,19 @@ final class WormStartFx {
         dust(store, at, hearers, cfg);
 
         // A short beat after the boom, everyone near who stands on sand feels the ripple under their own feet.
-        UUID owner = event.getTarget() != null ? event.getTarget() : event.getGroup().get(0);
+        UUID owner = event.getTrigger();
         TimedEffectsJob job = new TimedEffectsJob(world, owner, "startfx");
-        job.at((float) cfg.getStartRippleDelay(), () -> warn(world, world.getEntityStore().getStore(), event, at, cfg, sand));
+        job.at((float) cfg.getStartRippleDelay(), () -> warn(world, world.getEntityStore().getStore(), event, cfg, core));
         jobs.add(job);
     }
 
-    /** Everyone within the group radius of the start point or of the target. */
+    /** Everyone within the group radius of the start point. */
     private static List<PlayerRef> hearers(World world, Store<EntityStore> store, WormEvent event, Vector3d at,
                                            WormsOfArrakisConfig cfg) {
         List<PlayerRef> list = new ArrayList<>();
-        PlayerRef target = event.getTarget() == null ? null : com.hypixel.hytale.server.core.universe.Universe.get().getPlayer(event.getTarget());
-        Vector3d targetPos = target == null ? null : WormEffects.position(store, target);
         for (PlayerRef p : world.getPlayerRefs()) {
             Vector3d pos = WormEffects.position(store, p);
-            if (pos != null && (pos.distance(at) <= cfg.getGroupRadius()
-                    || (targetPos != null && pos.distance(targetPos) <= cfg.getGroupRadius()))) {
+            if (pos != null && pos.distance(at) <= cfg.getGroupRadius()) {
                 list.add(p);
             }
         }
@@ -90,21 +85,20 @@ final class WormStartFx {
         WormEffects.particle(store, "Block_Break_Sand", at.x, at.y + 1.5, at.z, scale * 1.5f, far, refs);
     }
 
-    /** One ripple under each player on sand; they see their own and anyone within the view distance sees it too. */
-    private static void warn(World world, Store<EntityStore> store, WormEvent event, Vector3d at, WormsOfArrakisConfig cfg,
-                             Set<Integer> sand) {
-        for (PlayerRef p : hearers(world, store, event, at, cfg)) {
-            Vector3d pos = WormEffects.position(store, p);
-            if (pos == null) {
+    /** One ripple under each listed being on sand; the being sees its own and anyone within the view distance sees it too. */
+    private static void warn(World world, Store<EntityStore> store, WormEvent event, WormsOfArrakisConfig cfg, AggroCore core) {
+        if (!event.isLive() || core == null) {
+            return;
+        }
+        for (UUID id : event.getList()) {
+            BeingAggro b = core.being(id);
+            if (b == null || !b.eligible || !b.onSand) {
                 continue;
             }
-            Boolean sandy = AggroManager.surfaceIsSand(world, pos.x, pos.z, sand);
-            if (sandy == null || !sandy) {
-                continue;
-            }
-            List<PlayerRef> viewers = new ArrayList<>(WormEffects.near(world, store, pos, cfg.getRippleViewDistance(), p));
+            Vector3d pos = new Vector3d(b.position);
+            List<PlayerRef> viewers = new ArrayList<>(WormEffects.near(world, store, pos, cfg.getRippleViewDistance(), b.ref));
             SinkJob.Options options = new SinkJob.Options();
-            options.owner = p.getUuid();
+            options.owner = id;
             SinkRipple.play(world, pos, 2, options, viewers);
         }
     }

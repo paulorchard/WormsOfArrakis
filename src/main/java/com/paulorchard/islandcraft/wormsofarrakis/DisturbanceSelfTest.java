@@ -9,7 +9,6 @@ import com.hypixel.hytale.server.core.modules.block.components.ItemContainerBloc
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.modules.entity.item.ItemComponent;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.ChunkStore;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import org.joml.Vector3d;
@@ -123,14 +122,23 @@ final class DisturbanceSelfTest {
         return n[0];
     }
 
-    private static int topSand(WorldChunk chunk, int x, int z, int sand) {
-        int top = chunk.getHeight(x & ChunkUtil.SIZE_MASK, z & ChunkUtil.SIZE_MASK);
-        return chunk.getBlock(x, top, z) == sand && chunk.getBlock(x, top + 1, z) == 0 ? top : Integer.MIN_VALUE;
+    /** The world access for the chunk holding x, z when it is loaded and ticking (the old getChunkIfLoaded), else null. */
+    private static WorldAccess loaded(World world, int x, int z) {
+        WorldAccess access = new WorldAccess(world);
+        return access.isTicking(x, z) ? access : null;
+    }
+
+    private static int topSand(WorldAccess chunk, int x, int z, int sand) {
+        int top = chunk.height(x, z);
+        if (top == WorldAccess.NO_HEIGHT) {
+            return Integer.MIN_VALUE;
+        }
+        return chunk.block(x, top, z) == sand && chunk.block(x, top + 1, z) == 0 ? top : Integer.MIN_VALUE;
     }
 
     /** A tower of three, a chest with items, and a two-block bed, on the sand at and near (x, z). Null if the sand is not flat enough. */
     private static Rig build(World world, Store<EntityStore> store, PlacedBlockTracker tracker, int x, int z, int sand) {
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
+        WorldAccess chunk = loaded(world, x, z);
         if (chunk == null) {
             return null;
         }
@@ -143,18 +151,18 @@ final class DisturbanceSelfTest {
         rig.sandY = y0;
         rig.sandZ = z;
         for (int h = 1; h <= 3; h++) {
-            chunk.setBlock(x, y0 + h, z, STONE);
+            chunk.setBlock(x, y0 + h, z, STONE, 0);
             rig.positions.add(new int[] {x, y0 + h, z});
         }
         int cx = x + 2;
         int cy = topSand(chunk, cx, z, sand);
         if (cy != Integer.MIN_VALUE) {
-            chunk.setBlock(cx, cy + 1, z, CHEST);
+            chunk.setBlock(cx, cy + 1, z, CHEST, 0);
             rig.chestX = cx;
             rig.chestY = cy + 1;
             rig.chestZ = z;
             rig.positions.add(new int[] {cx, cy + 1, z});
-            Ref<ChunkStore> ref = chunk.getBlockComponentEntity(cx, cy + 1, z);
+            Ref<ChunkStore> ref = chunk.blockEntity(cx, cy + 1, z);
             if (ref != null && ref.isValid()) {
                 ItemContainerBlock box = world.getChunkStore().getStore().getComponent(ref, ItemContainerBlock.getComponentType());
                 if (box != null) {
@@ -167,7 +175,7 @@ final class DisturbanceSelfTest {
         int bx = x + 4;
         int by = topSand(chunk, bx, z, sand);
         if (by != Integer.MIN_VALUE) {
-            chunk.setBlock(bx, by + 1, z, BED);
+            chunk.setBlock(bx, by + 1, z, BED, 0);
             rig.positions.add(new int[] {bx, by + 1, z});
         }
         rig.itemsBefore = rig.chestY == 0 ? 0 : itemsNear(store, rig.chestX + 0.5, rig.chestY + 0.5, rig.chestZ + 0.5);
@@ -181,41 +189,41 @@ final class DisturbanceSelfTest {
     private static String check(World world, Store<EntityStore> store, Rig rig, int sand, boolean strictItems) {
         List<String> problems = new ArrayList<>();
         for (int[] p : rig.positions) {
-            WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(p[0], p[2]));
+            WorldAccess chunk = loaded(world, p[0], p[2]);
             if (chunk == null) {
                 problems.add("the chunk is not loaded");
                 break;
             }
-            if (chunk.getBlock(p[0], p[1], p[2]) != 0) {
+            if (chunk.block(p[0], p[1], p[2]) != 0) {
                 problems.add("block left at " + p[0] + " " + p[1] + " " + p[2]);
             }
             // The cell beside the bed's origin: a half left behind would show here.
             for (int d = -1; d <= 1; d += 2) {
                 for (int[] axis : new int[][] {{d, 0, 0}, {0, 0, d}}) {
                     int x = p[0] + axis[0], z = p[2] + axis[2];
-                    WorldChunk c = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
-                    if (c != null && c.getBlock(x, p[1], z) != 0 && c.getBlock(x, p[1], z) != sand) {
+                    WorldAccess c = loaded(world, x, z);
+                    if (c != null && c.block(x, p[1], z) != 0 && c.block(x, p[1], z) != sand) {
                         boolean ours = false;
                         for (int[] q : rig.positions) {
                             ours |= q[0] == x && q[1] == p[1] && q[2] == z;
                         }
                         if (!ours) {
-                            problems.add("a block is left next to " + p[0] + " " + p[1] + " " + p[2] + ": " + c.getBlockType(x, p[1], z).getId());
+                            problems.add("a block is left next to " + p[0] + " " + p[1] + " " + p[2] + ": " + c.blockType(x, p[1], z).getId());
                         }
                     }
                 }
             }
         }
-        WorldChunk base = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(rig.sandX, rig.sandZ));
+        WorldAccess base = loaded(world, rig.sandX, rig.sandZ);
         if (base == null) {
             return problems.isEmpty() ? "the chunk is not loaded" : String.join("; ", problems);
         }
-        if (base.getBlock(rig.sandX, rig.sandY, rig.sandZ) != sand) {
+        if (base.block(rig.sandX, rig.sandY, rig.sandZ) != sand) {
             problems.add("the sand under the tower was touched");
         }
         if (rig.chestY != 0) {
-            WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(rig.chestX, rig.chestZ));
-            Ref<ChunkStore> ref = chunk.getBlockComponentEntity(rig.chestX, rig.chestY, rig.chestZ);
+            WorldAccess chunk = loaded(world, rig.chestX, rig.chestZ);
+            Ref<ChunkStore> ref = chunk.blockEntity(rig.chestX, rig.chestY, rig.chestZ);
             if (ref != null && ref.isValid()) {
                 problems.add("the chest's block entity is still there");
             }
@@ -231,12 +239,12 @@ final class DisturbanceSelfTest {
     private static void control(Consumer<String> say, World world, Store<EntityStore> store, Vector3d spot, int sand) {
         int x = (int) Math.floor(spot.x);
         int z = (int) Math.floor(spot.z);
-        WorldChunk chunk = null;
+        WorldAccess chunk = null;
         int y = Integer.MIN_VALUE;
         for (int d = 0; d < 40 && y == Integer.MIN_VALUE; d++) {
             x = (int) Math.floor(spot.x) + d;
             z = (int) Math.floor(spot.z) + 12;
-            chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
+            chunk = loaded(world, x, z);
             y = chunk == null ? Integer.MIN_VALUE : topSand(chunk, x, z, sand);
         }
         if (y == Integer.MIN_VALUE) {
@@ -247,16 +255,16 @@ final class DisturbanceSelfTest {
         StringBuilder out = new StringBuilder("disturbance flags control (chest with 8 stacks, new items on the ground right after):");
         for (int flags : new int[] {SandDisturbance.REMOVE_FLAGS, 0}) {
             int before = itemsNear(store, x + 0.5, y + 1.5, z + 0.5);
-            chunk.setBlock(x, y + 1, z, CHEST);
-            Ref<ChunkStore> ref = chunk.getBlockComponentEntity(x, y + 1, z);
+            chunk.setBlock(x, y + 1, z, CHEST, 0);
+            Ref<ChunkStore> ref = chunk.blockEntity(x, y + 1, z);
             ItemContainerBlock box = ref == null ? null : world.getChunkStore().getStore().getComponent(ref, ItemContainerBlock.getComponentType());
             if (box != null) {
                 for (int i = 0; i < 8; i++) {
                     box.getItemContainer().addItemStack(new ItemStack(STONE, 10 + i));
                 }
             }
-            chunk.breakBlock(x, y + 1, z, 0, flags);
-            Ref<ChunkStore> gone = chunk.getBlockComponentEntity(x, y + 1, z);
+            chunk.remove(x, y + 1, z, flags);
+            Ref<ChunkStore> gone = chunk.blockEntity(x, y + 1, z);
             out.append(flags == 0 ? " no flags: " : " REMOVE_FLAGS (" + flags + "): ").append(itemsNear(store, x + 0.5, y + 1.5, z + 0.5) - before)
                     .append(box == null ? " (no container found)" : "").append(gone != null && gone.isValid() ? ", block entity left" : ", block entity gone").append(';');
         }
@@ -279,7 +287,7 @@ final class DisturbanceSelfTest {
         // Look for a spot where the sand is flat enough for all three.
         for (int dx = 0; dx < 20 && rig == null; dx++) {
             for (int dz = 0; dz < 6 && rig == null; dz++) {
-                WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x + dx, z + dz));
+                WorldAccess chunk = loaded(world, x + dx, z + dz);
                 if (chunk == null) {
                     continue;
                 }
@@ -339,7 +347,7 @@ final class DisturbanceSelfTest {
         int x = (int) Math.floor(spot.x) + 16;
         int z = (int) Math.floor(spot.z) + 8;
         for (int dx = 0; dx < 24 && rig == null; dx++) {
-            WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x + dx, z));
+            WorldAccess chunk = loaded(world, x + dx, z);
             if (chunk != null && topSand(chunk, x + dx, z, sand) != Integer.MIN_VALUE
                     && topSand(chunk, x + dx + 2, z, sand) == topSand(chunk, x + dx, z, sand)
                     && topSand(chunk, x + dx + 4, z, sand) == topSand(chunk, x + dx, z, sand)

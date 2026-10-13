@@ -6,78 +6,94 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * One worm event for one group: STALKING, LOCKED, BREACH, then COOLDOWN. It knows nothing of the engine; the world
+ * One worm event for one list of beings: STALKING, LOCKED, BREACH, then ENDED. There is no worm travelling over the sand
+ * and no cooldown. The list is fixed when the event starts and only shrinks. It knows nothing of the engine; the world
  * is reached through {@link Env}, so the rules can be tested without a server.
  */
 public final class WormEvent {
 
-    /** What the event needs to know about the players, answered by the aggro manager. */
+    /** What the event needs to know about beings, answered by the aggro manager. Any kind of being, by UUID. */
     public interface Env {
-        /** The player is online, in this event's world and alive. */
-        boolean valid(UUID player);
+        /** The being is in this event's world, alive and eligible. */
+        boolean valid(UUID being);
 
-        /** The player is valid and standing on sand. */
-        boolean onSand(UUID player);
+        /** The being is valid and standing on sand. */
+        boolean onSand(UUID being);
 
-        /** The player's position, or null if not valid. */
-        Vector3d position(UUID player);
+        /** The being's position, or null if not valid. */
+        Vector3d position(UUID being);
 
-        /** Surface height at a column, or NaN if unknown (not loaded). The worm follows it. */
-        default double groundY(double x, double z) {
-            return Double.NaN;
+        /** The being's aggro. */
+        double score(UUID being);
+
+        /** Higher means the being gained aggro more recently. */
+        long recency(UUID being);
+
+        /** The being is not a player (a mob or a totem): if it is the target and is gone, the breach still happens. */
+        default boolean entity(UUID being) {
+            return false;
         }
     }
 
+    /** Why a being left the list early. */
+    public enum Leave {
+        /** Died, left the world, went Creative or was ignored. */
+        GONE,
+        /** Logged off. */
+        LOGOFF
+    }
+
     /** Lengths in seconds. */
-    public record Timings(double stalk, double lock, double breach, double cooldown, boolean retargetKeepsClock,
-                         double ease) {
+    public record Timings(double stalk, double lock, double breach) {
     }
 
     private final int id;
     private final String world;
-    private final List<UUID> group;
-    /** The group, best target first: highest aggro, ties to the most recent contributor. */
-    private final List<UUID> ranking;
+    private final UUID trigger;
+    private final List<UUID> list;
     private final Timings timings;
     private final boolean forced;
-    private final Vector3d worm;
-    /** Where the current leg of the worm path began, and how far through it the worm is. */
-    private final Vector3d legStart;
-    private double legElapsed;
-    private double legLength;
+    private final Vector3d origin;
     private final WormEventListener hooks;
+    /** The target is fixed from the start (an entity trigger) instead of chosen at the end of the stalk. */
+    private final boolean guaranteed;
+    private final Vector3d lastTargetPosition = new Vector3d();
+    /** Totems that expired during the stalk: still in the list as candidates, with the score and place they had. */
+    private final java.util.Map<UUID, Ghost> ghosts = new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** What an expired totem keeps: its score when it vanished, where it stood and when it last gained. */
+    record Ghost(double score, Vector3d position, long recency) {
+    }
 
     private UUID target;
+    /** The target is a mob or a totem: if it is gone at the lock or later, its last position still gets the breach. */
+    private boolean entityTarget;
     private WormPhase phase;
     private double elapsed;
     private double length;
     private WormEndReason endReason;
-    /** The target was there when BREACH began, so the breach counts as a kill however it goes. */
-    private boolean breachHadTarget;
 
-    /** Creates the event and enters STALKING, or ends it FIZZLED at once if {@code target} is null. */
-    WormEvent(int id, String world, List<UUID> ranking, UUID target, Vector3d wormStart, Timings timings,
+    /**
+     * Creates the event and enters STALKING. {@code guaranteedTarget} is null for a player trigger (the target is
+     * chosen at the end of the stalk) and the trigger itself for an entity trigger.
+     */
+    WormEvent(int id, String world, UUID trigger, List<UUID> list, UUID guaranteedTarget, Vector3d origin, Timings timings,
               boolean forced, WormEventListener hooks) {
         this.id = id;
         this.world = world;
-        this.ranking = new ArrayList<>(ranking);
-        this.group = Collections.unmodifiableList(new ArrayList<>(ranking));
-        this.target = target;
+        this.trigger = trigger;
+        this.list = new CopyOnWriteArrayList<>(list);
+        this.target = guaranteedTarget;
+        this.guaranteed = guaranteedTarget != null;
+        this.entityTarget = guaranteedTarget != null;
         this.timings = timings;
         this.forced = forced;
-        this.worm = new Vector3d(wormStart);
-        this.legStart = new Vector3d(wormStart);
-        this.legLength = Math.max(timings.stalk(), 0.001);
+        this.origin = new Vector3d(origin);
         this.hooks = hooks;
-        if (target == null) {
-            this.phase = WormPhase.ENDED;
-            this.endReason = WormEndReason.FIZZLED;
-            hooks.onEnd(this, WormEndReason.FIZZLED);
-        } else {
-            enter(WormPhase.STALKING, timings.stalk());
-        }
+        enter(WormPhase.STALKING, timings.stalk());
     }
 
     public int getId() {
@@ -105,22 +121,37 @@ public final class WormEvent {
         return Math.max(0, length - elapsed);
     }
 
-    /** The player being hunted, or null if the event fizzled at the start. */
+    /** The being that reached the threshold (or was forced). */
+    public UUID getTrigger() {
+        return trigger;
+    }
+
+    /** The being the worm takes: null until the end of the stalk, unless the trigger was an entity (then always set). */
     public UUID getTarget() {
         return target;
     }
 
-    /** Everyone in the group when the event started. */
-    public List<UUID> getGroup() {
-        return group;
+    /** True if the target was fixed at the start because an entity triggered the event. */
+    public boolean isGuaranteed() {
+        return guaranteed;
     }
 
-    /** The stand-in worm position: the point under the target, approaching from far away while STALKING. */
-    public Vector3d getWormPosition() {
-        return new Vector3d(worm);
+    /** Everyone still in the list. */
+    public List<UUID> getList() {
+        return Collections.unmodifiableList(new ArrayList<>(list));
     }
 
-    /** True if started by /worm trigger, which skips the threshold and the cooldown. */
+    /** Where the event began: the trigger being's position when the list was locked. */
+    public Vector3d getOrigin() {
+        return new Vector3d(origin);
+    }
+
+    /** The target's last known position, for a breach when the target has gone. Zero until a target was seen. */
+    public Vector3d getLastTargetPosition() {
+        return new Vector3d(lastTargetPosition);
+    }
+
+    /** True if started by /worm trigger, which skips the threshold. */
     public boolean isForced() {
         return forced;
     }
@@ -131,7 +162,7 @@ public final class WormEvent {
 
     /** STALKING, LOCKED or BREACH. */
     public boolean isActive() {
-        return phase == WormPhase.STALKING || phase == WormPhase.LOCKED || phase == WormPhase.BREACH;
+        return phase != WormPhase.ENDED;
     }
 
     /** False once the event can be dropped. */
@@ -139,8 +170,8 @@ public final class WormEvent {
         return phase != WormPhase.ENDED;
     }
 
-    public boolean hasMember(UUID player) {
-        return group.contains(player);
+    public boolean hasMember(UUID being) {
+        return list.contains(being);
     }
 
     private void enter(WormPhase next, double seconds) {
@@ -153,18 +184,47 @@ public final class WormEvent {
 
     private void finish(WormEndReason reason) {
         endReason = reason;
-        if (reason != WormEndReason.DEVOURED) {
-            enter(WormPhase.ENDED, 0);
-        }
+        enter(WormPhase.ENDED, 0);
         hooks.onEnd(this, reason);
+    }
+
+    /**
+     * Adds a being to the list while the event is still stalking (a totem thrown by someone in the list). The stalk is
+     * not restarted. Returns false if the event is past STALKING or the being is already listed.
+     */
+    boolean addMember(UUID being) {
+        if (phase != WormPhase.STALKING || list.contains(being)) {
+            return false;
+        }
+        list.add(being);
+        hooks.onMemberAdded(this, being);
+        return true;
+    }
+
+    /**
+     * A totem of a player-triggered event has expired during the stalk. It stays in the list as a candidate with the
+     * score it had and the place it stood, so it can still be chosen as the target: the decoy worked while it stood.
+     * Returns false (and does nothing) if the event is past STALKING, is an entity trigger, or does not list the being.
+     */
+    boolean retire(UUID being, double score, Vector3d position, long recency) {
+        if (phase != WormPhase.STALKING || guaranteed || !list.contains(being)) {
+            return false;
+        }
+        ghosts.put(being, new Ghost(score, new Vector3d(position), recency));
+        return true;
+    }
+
+    /** Takes a being out of the list now. The manager looks after its aggro. */
+    void removeMember(UUID being, Leave why) {
+        if (list.remove(being)) {
+            hooks.onMemberRemoved(this, being, why);
+        }
     }
 
     /** Ends the event now (command or server stop). */
     void stop() {
-        if (phase != WormPhase.ENDED && endReason == null) {
+        if (phase != WormPhase.ENDED) {
             finish(WormEndReason.STOPPED);
-        } else if (phase != WormPhase.ENDED) {
-            enter(WormPhase.ENDED, 0); // already devoured: just cut the cooldown short
         }
     }
 
@@ -174,45 +234,37 @@ public final class WormEvent {
             return;
         }
         elapsed += dt;
+        for (UUID member : list) {
+            if (!ghosts.containsKey(member) && !env.valid(member)) {
+                removeMember(member, Leave.GONE);
+            }
+        }
+        if (target != null) {
+            Vector3d p = env.position(target);
+            if (p != null) {
+                lastTargetPosition.set(p);
+            }
+        }
         switch (phase) {
             case STALKING -> {
-                if (!env.onSand(target)) {
-                    retarget(env);
-                }
-                if (phase == WormPhase.STALKING) {
-                    approach(dt, env);
-                    if (elapsed >= length) {
-                        enter(WormPhase.LOCKED, timings.lock());
-                    }
+                if (list.isEmpty() && !guaranteed) {
+                    finish(WormEndReason.FIZZLED);
+                } else if (elapsed >= length) {
+                    chooseAndLock(env);
                 }
             }
             case LOCKED -> {
-                // The target cannot change here, whatever they stand on. Only if they are gone is there no one.
-                if (!env.valid(target)) {
+                // The target cannot change here, whatever they stand on. If a player target is gone entirely there is
+                // no one to take; an entity target that is gone still gets its breach, with no victim.
+                if (!entityTarget && !env.valid(target)) {
                     finish(WormEndReason.FIZZLED);
-                } else {
-                    follow(env);
-                    if (elapsed >= length) {
-                        breachHadTarget = true;
-                        enter(WormPhase.BREACH, timings.breach());
-                    }
+                } else if (elapsed >= length) {
+                    enter(WormPhase.BREACH, timings.breach());
                 }
             }
             case BREACH -> {
-                follow(env);
                 if (elapsed >= length) {
-                    boolean present = breachHadTarget;
-                    if (present) {
-                        enter(WormPhase.COOLDOWN, timings.cooldown());
-                        finish(WormEndReason.DEVOURED);
-                    } else {
-                        finish(WormEndReason.FIZZLED);
-                    }
-                }
-            }
-            case COOLDOWN -> {
-                if (elapsed >= length) {
-                    enter(WormPhase.ENDED, 0);
+                    finish(WormEndReason.DEVOURED);
                 }
             }
             default -> {
@@ -223,53 +275,27 @@ public final class WormEvent {
         }
     }
 
-    /** The target left the sand (or the game): the first player in the ranking now on sand takes over. */
-    private void retarget(WormEvent.Env env) {
-        UUID next = null;
-        for (UUID candidate : ranking) {
-            if (env.onSand(candidate)) {
-                next = candidate;
-                break;
+    /** The end of the stalk: the member with the highest aggro who is on sand now is the target. */
+    private void chooseAndLock(Env env) {
+        if (!guaranteed) {
+            List<ListScan.Ranked> ranked = new ArrayList<>();
+            for (UUID member : list) {
+                Ghost g = ghosts.get(member);
+                ranked.add(g != null ? new ListScan.Ranked(member, g.score(), g.recency(), true)
+                        : new ListScan.Ranked(member, env.score(member), env.recency(member), env.onSand(member)));
+            }
+            target = ListScan.chooseTarget(ranked);
+            if (target == null) {
+                finish(WormEndReason.FIZZLED);
+                return;
+            }
+            Ghost chosen = ghosts.get(target);
+            entityTarget = chosen != null || env.entity(target);
+            Vector3d p = chosen != null ? chosen.position() : env.position(target);
+            if (p != null) {
+                lastTargetPosition.set(p);
             }
         }
-        if (next == null) {
-            finish(WormEndReason.FIZZLED);
-            return;
-        }
-        UUID old = target;
-        target = next;
-        if (!timings.retargetKeepsClock()) {
-            elapsed = 0;
-        }
-        // The path bends: a new leg from where the worm is, timed to arrive when the clock runs out.
-        legStart.set(worm);
-        legElapsed = 0;
-        legLength = Math.max(length - elapsed, 0.001);
-        hooks.onRetarget(this, old, next);
-    }
-
-    /**
-     * Moves the stand-in worm along a straight leg from where it started to the target, which may be moving, with
-     * an ease-in: slow at first, faster near the end, arriving as the stalk clock runs out. It follows the surface.
-     */
-    private void approach(double dt, Env env) {
-        Vector3d p = env.position(target);
-        if (p == null) {
-            return;
-        }
-        legElapsed += dt;
-        double u = Math.min(1.0, legElapsed / legLength);
-        double progress = Math.pow(u, timings.ease());
-        worm.x = legStart.x + (p.x - legStart.x) * progress;
-        worm.z = legStart.z + (p.z - legStart.z) * progress;
-        double ground = env.groundY(worm.x, worm.z);
-        worm.y = Double.isNaN(ground) ? p.y : ground;
-    }
-
-    private void follow(Env env) {
-        Vector3d p = env.position(target);
-        if (p != null) {
-            worm.set(p);
-        }
+        enter(WormPhase.LOCKED, timings.lock());
     }
 }

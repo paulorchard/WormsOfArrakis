@@ -26,6 +26,8 @@ class WormEventTest {
 
     private final Set<UUID> online = new HashSet<>();
     private final Set<UUID> onSand = new HashSet<>();
+    private final Map<UUID, Double> score = new HashMap<>();
+    private final Map<UUID, Long> recency = new HashMap<>();
     private final Map<UUID, Vector3d> where = new HashMap<>();
     private final List<String> log = new ArrayList<>();
 
@@ -41,6 +43,14 @@ class WormEventTest {
         public Vector3d position(UUID p) {
             return online.contains(p) ? where.get(p) : null;
         }
+
+        public double score(UUID p) {
+            return score.getOrDefault(p, 0.0);
+        }
+
+        public long recency(UUID p) {
+            return recency.getOrDefault(p, 0L);
+        }
     };
 
     private final WormEventListener hooks = new WormEventListener() {
@@ -48,14 +58,16 @@ class WormEventTest {
             log.add(old + ">" + now);
         }
 
-        public void onRetarget(WormEvent e, UUID o, UUID n) {
-            log.add("retarget");
+        public void onMemberRemoved(WormEvent e, UUID who, WormEvent.Leave why) {
+            log.add("left:" + why);
         }
 
         public void onEnd(WormEvent e, WormEndReason r) {
             log.add("end:" + r);
         }
     };
+
+    private static final WormEvent.Timings T = new WormEvent.Timings(10, 4, 3);
 
     @BeforeEach
     void setUp() {
@@ -66,11 +78,9 @@ class WormEventTest {
         }
     }
 
-    private WormEvent event(UUID target, WormEvent.Timings t) {
-        return new WormEvent(1, "default", List.of(a, b, c), target, new Vector3d(150, 80, 0), t, false, hooks);
+    private WormEvent event(UUID trigger, UUID guaranteed) {
+        return new WormEvent(1, "default", trigger, List.of(a, b, c), guaranteed, new Vector3d(5, 80, 5), T, false, hooks);
     }
-
-    private static final WormEvent.Timings T = new WormEvent.Timings(10, 4, 3, 120, false, 1.0);
 
     private void run(WormEvent e, double seconds) {
         for (double t = 0; t < seconds; t += 0.1) {
@@ -79,133 +89,139 @@ class WormEventTest {
     }
 
     @Test
-    void runsAllPhasesWithTheRightTimings() {
-        WormEvent e = event(a, T);
+    void runsAllPhasesWithTheRightTimingsAndEndsWithNoCooldown() {
+        score.put(a, 10.0);
+        WormEvent e = event(a, null);
         assertEquals(WormPhase.STALKING, e.getPhase());
-        run(e, 9.5);
-        assertEquals(WormPhase.STALKING, e.getPhase());
-        run(e, 1.0); // 10.5 s
-        assertEquals(WormPhase.LOCKED, e.getPhase());
-        run(e, 4.0); // 14.5 s
-        assertEquals(WormPhase.BREACH, e.getPhase());
-        run(e, 3.0); // 17.5 s
-        assertEquals(WormPhase.COOLDOWN, e.getPhase());
-        assertEquals(WormEndReason.DEVOURED, e.getEndReason());
-        run(e, 121);
-        assertEquals(WormPhase.ENDED, e.getPhase());
-        assertEquals(List.of("null>STALKING", "STALKING>LOCKED", "LOCKED>BREACH", "BREACH>COOLDOWN", "end:DEVOURED",
-                "COOLDOWN>ENDED"), log);
-    }
-
-    @Test
-    void wormArrivesAtTheTargetAsTheClockRunsOut() {
-        WormEvent e = event(a, T);
-        run(e, 9.9);
-        assertTrue(e.getWormPosition().distance(where.get(a)) < 3, "worm at " + e.getWormPosition());
-    }
-
-    @Test
-    void targetOnRockDuringStalkingPicksTheNextSandPlayerAndRestartsTheClock() {
-        WormEvent e = event(a, T);
-        run(e, 6);
-        onSand.remove(a);
-        e.advance(0.1, env);
-        assertEquals(b, e.getTarget());
-        assertEquals(WormPhase.STALKING, e.getPhase());
-        assertEquals(10.0, e.getSecondsLeft(), 0.01);
-        assertTrue(log.contains("retarget"));
-    }
-
-    @Test
-    void retargetKeepsClockWhenConfigured() {
-        WormEvent e = event(a, new WormEvent.Timings(10, 4, 3, 120, true, 1.0));
-        run(e, 6);
-        onSand.remove(a);
-        e.advance(0.1, env);
-        assertEquals(b, e.getTarget());
-        assertEquals(3.9, e.getSecondsLeft(), 0.2);
-    }
-
-    @Test
-    void everyoneOnRockFizzles() {
-        WormEvent e = event(a, T);
-        run(e, 2);
-        onSand.clear();
-        e.advance(0.1, env);
-        assertEquals(WormPhase.ENDED, e.getPhase());
-        assertEquals(WormEndReason.FIZZLED, e.getEndReason());
-    }
-
-    @Test
-    void lockedTargetCannotEscape() {
-        WormEvent e = event(a, T);
-        run(e, 10.5);
-        assertEquals(WormPhase.LOCKED, e.getPhase());
-        onSand.remove(a);
-        run(e, 3);
-        assertEquals(a, e.getTarget());
-        assertEquals(WormPhase.LOCKED, e.getPhase());
-        assertFalse(log.contains("retarget"));
-    }
-
-    @Test
-    void targetDisconnectingWhileStalkingMovesOn() {
-        WormEvent e = event(a, T);
-        run(e, 2);
-        online.remove(a);
-        e.advance(0.1, env);
-        assertEquals(b, e.getTarget());
-    }
-
-    @Test
-    void targetDisconnectingWhileLockedFizzles() {
-        WormEvent e = event(a, T);
-        run(e, 10.5);
-        online.remove(a);
-        e.advance(0.1, env);
-        assertEquals(WormEndReason.FIZZLED, e.getEndReason());
-    }
-
-    @Test
-    void noTargetFizzlesAtOnce() {
-        WormEvent e = event(null, T);
-        assertEquals(WormPhase.ENDED, e.getPhase());
         assertNull(e.getTarget());
-        assertEquals(List.of("end:FIZZLED"), log);
+        run(e, 9.7);
+        assertEquals(WormPhase.STALKING, e.getPhase());
+        run(e, 0.6);
+        assertEquals(WormPhase.LOCKED, e.getPhase());
+        assertEquals(a, e.getTarget());
+        run(e, 4.1);
+        assertEquals(WormPhase.BREACH, e.getPhase());
+        run(e, 3.1);
+        assertEquals(WormPhase.ENDED, e.getPhase());
+        assertEquals(WormEndReason.DEVOURED, e.getEndReason());
+        assertEquals(List.of("null>STALKING", "STALKING>LOCKED", "LOCKED>BREACH", "BREACH>ENDED", "end:DEVOURED"), log);
+        assertEquals(5, e.getOrigin().x, 1e-9);
     }
 
     @Test
-    void stopEndsAnEventAndACooldown() {
-        WormEvent e = event(a, T);
-        e.stop();
-        assertEquals(WormEndReason.STOPPED, e.getEndReason());
-        assertEquals(WormPhase.ENDED, e.getPhase());
+    void theTargetIsTheHighestOnSandAtTheEndNotAtTheStart() {
+        score.put(a, 10.0);
+        score.put(b, 20.0);
+        WormEvent e = event(a, null);
+        run(e, 5);
+        score.put(a, 160.0); // gains inside the event, past the threshold: no cap
+        run(e, 5.5);
+        assertEquals(a, e.getTarget());
+    }
+
+    @Test
+    void aHigherScoringMemberOffSandIsNotChosenButIsChosenIfTheyReturn() {
+        score.put(a, 10.0);
+        score.put(b, 300.0);
+        WormEvent e = event(a, null);
+        onSand.remove(b);
+        run(e, 9.0);
+        assertTrue(e.hasMember(b), "leaving the sand does not leave the list");
+        onSand.add(b);
+        run(e, 1.5);
+        assertEquals(b, e.getTarget());
+    }
+
+    @Test
+    void offSandAtTheEndIsSkippedAndNobodyOnSandFizzles() {
+        score.put(a, 10.0);
+        score.put(b, 300.0);
+        WormEvent e = event(a, null);
+        onSand.remove(b);
+        run(e, 10.5);
+        assertEquals(a, e.getTarget());
 
         log.clear();
-        WormEvent d = event(a, new WormEvent.Timings(1, 1, 1, 120, false, 1.0));
-        run(d, 3.5);
-        assertEquals(WormPhase.COOLDOWN, d.getPhase());
-        d.stop();
-        assertEquals(WormPhase.ENDED, d.getPhase());
-        assertEquals(WormEndReason.DEVOURED, d.getEndReason());
+        WormEvent f = event(a, null);
+        onSand.clear();
+        run(f, 10.5);
+        assertEquals(WormPhase.ENDED, f.getPhase());
+        assertEquals(WormEndReason.FIZZLED, f.getEndReason());
+        assertNull(f.getTarget());
+        assertFalse(log.contains("STALKING>LOCKED"));
     }
 
     @Test
-    void breachEndsDevouredEvenThoughTheTargetIsDeadByThen() {
-        WormEvent e = event(a, T);
-        run(e, 14.6); // into BREACH
+    void tieAtTheEndGoesToTheMostRecentGainer() {
+        score.put(a, 50.0);
+        score.put(b, 50.0);
+        recency.put(a, 3L);
+        recency.put(b, 9L);
+        WormEvent e = event(a, null);
+        run(e, 10.5);
+        assertEquals(b, e.getTarget());
+    }
+
+    @Test
+    void membersWhoLeaveAreRemovedAndEveryoneLeavingFizzles() {
+        WormEvent e = event(a, null);
+        online.remove(b);
+        run(e, 0.2);
+        assertEquals(List.of(a, c), e.getList());
+        assertTrue(log.contains("left:GONE"));
+        online.clear();
+        run(e, 0.2);
+        assertEquals(WormEndReason.FIZZLED, e.getEndReason());
+        assertTrue(e.getList().isEmpty());
+    }
+
+    @Test
+    void aTargetWhoVanishesWhileLockedFizzlesTheEvent() {
+        score.put(a, 80.0);
+        WormEvent e = event(a, null);
+        run(e, 10.5);
+        assertEquals(WormPhase.LOCKED, e.getPhase());
+        online.remove(a);
+        run(e, 0.2);
+        assertEquals(WormEndReason.FIZZLED, e.getEndReason());
+    }
+
+    @Test
+    void aGuaranteedEntityTargetSkipsTheSelectionAndStillBreachesWhenItIsGone() {
+        UUID mob = UUID.randomUUID();
+        online.add(mob);
+        onSand.add(mob);
+        where.put(mob, new Vector3d(7, 80, 7));
+        score.put(a, 500.0); // a player with a much higher score is not chosen
+        WormEvent e = new WormEvent(2, "default", mob, List.of(mob, a), mob, new Vector3d(7, 80, 7), T, false, hooks);
+        assertEquals(mob, e.getTarget());
+        assertTrue(e.isGuaranteed());
+        run(e, 5);
+        online.remove(mob); // despawned or died before the end
+        run(e, 5.5);
+        assertEquals(WormPhase.LOCKED, e.getPhase());
+        assertEquals(mob, e.getTarget());
+        assertEquals(7, e.getLastTargetPosition().x, 1e-9);
+        run(e, 4.1);
         assertEquals(WormPhase.BREACH, e.getPhase());
-        online.remove(a); // swallowed: no longer a valid player
-        run(e, 3.2);
-        assertEquals(WormPhase.COOLDOWN, e.getPhase());
+        run(e, 3.1);
         assertEquals(WormEndReason.DEVOURED, e.getEndReason());
     }
 
     @Test
-    void easeInMakesTheWormSlowAtFirst() {
-        WormEvent e = new WormEvent(1, "default", List.of(a), a, new Vector3d(100, 80, 0), new WormEvent.Timings(10, 4, 3, 120, false, 2.0), false, hooks);
-        run(e, 5.0); // half the time
-        double covered = 100 - e.getWormPosition().x;
-        assertTrue(covered > 20 && covered < 30, "covered " + covered); // a quarter, not a half
+    void stopEndsItNow() {
+        WormEvent e = event(a, null);
+        run(e, 1);
+        e.stop();
+        assertEquals(WormPhase.ENDED, e.getPhase());
+        assertEquals(WormEndReason.STOPPED, e.getEndReason());
+        assertFalse(e.isLive());
+    }
+
+    @Test
+    void secondsLeftCountsDownInThePhase() {
+        WormEvent e = event(a, null);
+        run(e, 3);
+        assertEquals(7, e.getSecondsLeft(), 0.15);
     }
 }

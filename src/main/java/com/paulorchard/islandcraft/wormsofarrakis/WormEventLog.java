@@ -12,8 +12,8 @@ import java.util.function.Supplier;
 import java.util.logging.Level;
 
 /**
- * The built-in listener: writes every phase change, retarget and end to the server log, to operators in chat when
- * DebugChat is on, and puts a fizzled group back to a share of the threshold.
+ * The built-in listener: writes every phase change and end to the server log, and to operators in chat when
+ * DebugChat is on.
  */
 final class WormEventLog implements WormEventListener {
 
@@ -33,8 +33,12 @@ final class WormEventLog implements WormEventListener {
         if (id == null) {
             return "nobody";
         }
-        PlayerAggro a = manager.state(id);
-        return a != null && a.ref != null ? a.ref.getUsername() : id.toString().substring(0, 8);
+        BeingAggro a = manager.state(id);
+        if (a != null && a.ref != null) {
+            return a.ref.getUsername();
+        }
+        String label = a != null && a.label != null ? a.label + " " : "";
+        return (a != null ? a.kind.name().toLowerCase(Locale.ROOT) + " " : "") + label + id.toString().substring(0, 8);
     }
 
     static String names(AggroManager manager, List<UUID> ids) {
@@ -50,10 +54,10 @@ final class WormEventLog implements WormEventListener {
         String target = name(manager, event.getTarget());
         String seconds = String.format(Locale.ROOT, "%.0f", event.getSecondsLeft());
         if (old == null) {
-            log("[Worm #%d] started in %s for group [%s], target %s, stalking for %ss", event.getId(),
-                    event.getWorldName(), names(manager, event.getGroup()), target, seconds);
+            log("[Worm #%d] started in %s by %s for list [%s], stalking for %ss", event.getId(),
+                    event.getWorldName(), name(manager, event.getTrigger()), names(manager, event.getList()), seconds);
             chat(Message.translation(LANG + "start").param("id", String.valueOf(event.getId()))
-                    .param("group", names(manager, event.getGroup())).param("target", target)
+                    .param("group", names(manager, event.getList())).param("target", name(manager, event.getTrigger()))
                     .param("seconds", seconds));
             return;
         }
@@ -63,19 +67,19 @@ final class WormEventLog implements WormEventListener {
     }
 
     @Override
-    public void onRetarget(WormEvent event, UUID oldTarget, UUID newTarget) {
-        log("[Worm #%d] retarget %s -> %s", event.getId(), name(manager, oldTarget), name(manager, newTarget));
-        chat(Message.translation(LANG + "retarget").param("id", String.valueOf(event.getId()))
-                .param("old", name(manager, oldTarget)).param("new", name(manager, newTarget)));
+    public void onMemberAdded(WormEvent event, UUID being) {
+        log("[Worm #%d] %s joined the list", event.getId(), name(manager, being));
+    }
+
+    @Override
+    public void onMemberRemoved(WormEvent event, UUID being, WormEvent.Leave why) {
+        log("[Worm #%d] %s left the list (%s)", event.getId(), name(manager, being), why);
     }
 
     @Override
     public void onEnd(WormEvent event, WormEndReason reason) {
         log("[Worm #%d] ended: %s", event.getId(), reason);
         chat(Message.translation(LANG + "end").param("id", String.valueOf(event.getId())).param("reason", reason.name()));
-        if (reason == WormEndReason.FIZZLED && !event.isForced()) {
-            manager.agitate(event);
-        }
     }
 
     private static void log(String format, Object... args) {

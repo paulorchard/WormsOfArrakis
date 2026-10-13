@@ -13,7 +13,9 @@
   "Dependencies": {
     "Hytale:Weather": "*",
     "Hytale:EntityModule": "*",
-    "Hytale:Camera": "*"
+    "Hytale:Camera": "*",
+    "Hytale:NPC": "*",
+    "Hytale:Deployables": "*"
   },
   "OptionalDependencies": {
     "IslandCraft:IslandCraft - Dunes of Arrakis": "*"

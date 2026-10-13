@@ -3,7 +3,7 @@ package com.paulorchard.islandcraft.wormsofarrakis;
 import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
+import com.hypixel.hytale.server.core.universe.world.chunk.heightmap.HeightmapColumn;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -85,8 +85,12 @@ final class ChunkRumbleJob {
         if (!SinkJob.missingAssets().isEmpty()) {
             return null;
         }
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunk(cx, cz));
-        if (chunk == null) {
+        WorldAccess access = new WorldAccess(world);
+        if (!access.isTickingChunk(cx, cz)) {
+            return null;
+        }
+        HeightmapColumn heights = access.heightmap(cx * 32, cz * 32);
+        if (heights == null) {
             return null;
         }
         ChunkRumbleJob job = new ChunkRumbleJob(world, cx, cz, schedule, maxEdits);
@@ -95,8 +99,8 @@ final class ChunkRumbleJob {
             for (int lx = 0; lx < 32; lx++) {
                 int x = cx * 32 + lx;
                 int z = cz * 32 + lz;
-                int top = chunk.getHeight(lx, lz);
-                if (chunk.getBlock(x, top, z) != sandId || chunk.getBlock(x, top + 1, z) != 0) {
+                int top = heights.getHeight(x, z);
+                if (top == WorldAccess.NO_HEIGHT || access.block(x, top, z) != sandId || access.block(x, top + 1, z) != 0) {
                     continue;
                 }
                 Cell cell = new Cell(lz * 32 + lx, x, top, z);

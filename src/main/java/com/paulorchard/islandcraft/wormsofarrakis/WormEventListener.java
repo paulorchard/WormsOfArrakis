@@ -3,9 +3,8 @@ package com.paulorchard.islandcraft.wormsofarrakis;
 import java.util.UUID;
 
 /**
- * Hooks for the effects of prompts 19 and 20. All run on the world thread. Register with
- * {@link WormEvents#addListener}. Read the event for the phase, the seconds left, the target, the group and the
- * worm's position.
+ * Hooks for the effects. All run on the world thread. Register with {@link WormEvents#addListener}. Read the event for
+ * the phase, the seconds left, the target, the list and the origin.
  */
 public interface WormEventListener {
 
@@ -17,11 +16,15 @@ public interface WormEventListener {
     default void onTick(WormEvent event) {
     }
 
-    /** The worm picked a new target while STALKING. */
-    default void onRetarget(WormEvent event, UUID oldTarget, UUID newTarget) {
+    /** A being joined the list after the event began (a totem thrown by someone in it). */
+    default void onMemberAdded(WormEvent event, UUID being) {
     }
 
-    /** The event is over. For DEVOURED the group is still in COOLDOWN; for the others the phase is ENDED. */
+    /** A being left the list before the event ended (it died, left the world, went Creative or logged off). */
+    default void onMemberRemoved(WormEvent event, UUID being, WormEvent.Leave why) {
+    }
+
+    /** The event is over and the phase is ENDED. The list is still readable. */
     default void onEnd(WormEvent event, WormEndReason reason) {
     }
 }

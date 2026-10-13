@@ -14,7 +14,6 @@ import com.hypixel.hytale.protocol.ServerCameraSettings;
 import com.hypixel.hytale.protocol.packets.camera.SetServerCamera;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import org.joml.Vector3d;
 
@@ -154,10 +153,14 @@ final class BreachCamera {
         double cx = centre.x + dx / len * distance;
         double cz = centre.z + dz / len * distance;
         double cy = centre.y + wormHeight * 0.5;
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(cx, cz));
-        if (chunk != null) {
-            int ground = chunk.getHeight((int) Math.floor(cx) & ChunkUtil.SIZE_MASK, (int) Math.floor(cz) & ChunkUtil.SIZE_MASK);
-            cy = Math.max(cy, ground + 3.0);
+        WorldAccess access = new WorldAccess(world);
+        int gx = (int) Math.floor(cx);
+        int gz = (int) Math.floor(cz);
+        if (access.isTicking(gx, gz)) {
+            int ground = access.height(gx, gz);
+            if (ground != WorldAccess.NO_HEIGHT) {
+                cy = Math.max(cy, ground + 3.0);
+            }
         }
         sendAt(m, cx, cy, cz, centre.x, centre.y + wormHeight * 0.5, centre.z);
     }
@@ -193,10 +196,14 @@ final class BreachCamera {
         double cx = at.x - dir.x * d;
         double cy = at.y + 1.6 - dir.y * d;
         double cz = at.z - dir.z * d;
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(cx, cz));
-        if (chunk != null) {
-            int ground = chunk.getHeight((int) Math.floor(cx) & ChunkUtil.SIZE_MASK, (int) Math.floor(cz) & ChunkUtil.SIZE_MASK);
-            cy = Math.max(cy, ground + 2.0);
+        WorldAccess access = new WorldAccess(world);
+        int gx = (int) Math.floor(cx);
+        int gz = (int) Math.floor(cz);
+        if (access.isTicking(gx, gz)) {
+            int ground = access.height(gx, gz);
+            if (ground != WorldAccess.NO_HEIGHT) {
+                cy = Math.max(cy, ground + 2.0);
+            }
         }
         sendAt(m, cx, cy, cz, lookAt.x, lookAt.y + 1.0, lookAt.z);
     }

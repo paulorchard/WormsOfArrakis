@@ -14,7 +14,6 @@ import com.hypixel.hytale.server.core.event.events.ecs.EnvironmentBreakBlockEven
 import com.hypixel.hytale.server.core.event.events.ecs.PlaceBlockEvent;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import org.joml.Vector3i;
 
@@ -148,8 +147,8 @@ final class PlacedBlockTracker {
             }
         }
         // Sand only counts from below: a block set on rock beside a dune is not on the sand.
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
-        return chunk != null && y >= 1 && chunk.getBlock(x, y - 1, z) == arrakisSand;
+        WorldAccess access = new WorldAccess(world);
+        return access.isTicking(x, z) && y >= 1 && access.block(x, y - 1, z) == arrakisSand;
     }
 
     /** Item key of a block id, so that open and closed doors, chests and so on count as the same block. */
@@ -180,11 +179,11 @@ final class PlacedBlockTracker {
     }
 
     private void confirm(World world, Pending p) {
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(p.x(), p.z()));
-        if (chunk == null) {
+        WorldAccess access = new WorldAccess(world);
+        if (!access.isTicking(p.x(), p.z())) {
             return;
         }
-        int id = chunk.getBlock(p.x(), p.y(), p.z());
+        int id = access.block(p.x(), p.y(), p.z());
         if (id == 0) {
             return; // cancelled, or never set
         }
@@ -213,11 +212,11 @@ final class PlacedBlockTracker {
         if (block == null) {
             return false;
         }
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
-        if (chunk == null) {
+        WorldAccess access = new WorldAccess(world);
+        if (!access.isTicking(x, z)) {
             return false; // not loaded: nothing can be said
         }
-        int id = chunk.getBlock(x, y, z);
+        int id = access.block(x, y, z);
         if (id == block.blockId || (id != 0 && block.key != null && block.key.equals(keyOf(id)))) {
             return false;
         }
@@ -352,10 +351,10 @@ final class PlacedBlockTracker {
 
     /** Adds a block as if a player had placed it and the next tick had confirmed it (for the self-test and commands). */
     Placed addForTest(World world, int x, int y, int z, UUID by) {
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
+        WorldAccess access = new WorldAccess(world);
         ChunkRecord record = recordFor(world.getName(), ChunkUtil.chunkCoordinate(x), ChunkUtil.chunkCoordinate(z));
         Placed block = new Placed(x, y, z, by, System.currentTimeMillis());
-        block.blockId = chunk == null ? 0 : chunk.getBlock(x, y, z);
+        block.blockId = access.isTicking(x, z) ? access.block(x, y, z) : 0;
         block.key = keyOf(block.blockId);
         record.blocks.put(pack(x, y, z), block);
         Listener l = listener;

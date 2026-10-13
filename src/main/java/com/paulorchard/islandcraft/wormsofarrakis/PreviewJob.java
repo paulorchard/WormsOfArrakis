@@ -1,7 +1,6 @@
 package com.paulorchard.islandcraft.wormsofarrakis;
 
 import com.hypixel.hytale.component.Store;
-import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
@@ -17,7 +16,7 @@ import java.util.function.Supplier;
  */
 final class PreviewJob implements WormTestSystem.Job {
 
-    static final List<String> EFFECTS = List.of("wormsign", "rumble", "ripple", "vignette", "slow", "shake", "zoom");
+    static final List<String> EFFECTS = List.of("rumble", "ripple", "stumble", "vignette", "slow", "shake", "zoom");
 
     private final WormEffects fx;
     private final World world;
@@ -28,8 +27,6 @@ final class PreviewJob implements WormTestSystem.Job {
     private final Supplier<WormsOfArrakisConfig> config;
     private double elapsed;
     private double timer = 1e9;
-    private Vector3d wormStart;
-    private Vector3d lastTrail;
 
     PreviewJob(WormEffects fx, World world, PlayerRef player, com.hypixel.hytale.component.Ref<EntityStore> ref,
                String effect, double seconds, Supplier<WormsOfArrakisConfig> config) {
@@ -71,24 +68,6 @@ final class PreviewJob implements WormTestSystem.Job {
             return false;
         }
         switch (effect) {
-            case "wormsign" -> {
-                if (wormStart == null) {
-                    HeadRotation head = store.getComponent(ref, HeadRotation.getComponentType());
-                    Vector3d d = head == null ? new Vector3d(0, 0, 1) : head.getDirection();
-                    double len = Math.max(1e-6, Math.hypot(d.x, d.z));
-                    wormStart = new Vector3d(pos.x + d.x / len * 120, pos.y, pos.z + d.z / len * 120);
-                }
-                double p = Math.pow(u, cfg.getPathEaseExponent());
-                Vector3d worm = new Vector3d(wormStart.x + (pos.x - wormStart.x) * p, pos.y,
-                        wormStart.z + (pos.z - wormStart.z) * p);
-                if (timer >= cfg.getWormsignTrailInterval()) {
-                    timer = 0;
-                    boolean puff = ((int) (elapsed / cfg.getWormsignPuffInterval()))
-                            != ((int) ((elapsed - cfg.getWormsignTrailInterval()) / cfg.getWormsignPuffInterval()));
-                    fx.trail(world, store, lastTrail, worm, List.of(player), puff, cfg);
-                    lastTrail = worm;
-                }
-            }
             case "rumble" -> {
                 if (timer >= cfg.getRumbleIntervalSeconds()) {
                     timer = 0;
@@ -102,6 +81,12 @@ final class PreviewJob implements WormTestSystem.Job {
                 if (timer >= interval) {
                     timer = 0;
                     fx.sink(world, store, player.getUuid(), pos, 2, null, false, cfg.getRippleViewDistance(), player);
+                }
+            }
+            case "stumble" -> {
+                if (timer >= cfg.getStalkPulseSeconds()) {
+                    timer = 0;
+                    fx.stumble(world, store, player.getUuid(), ref);
                 }
             }
             case "zoom" -> fx.fxOf(player).wantZoom(u);

@@ -5,8 +5,7 @@ import com.hypixel.hytale.protocol.packets.world.ServerSetBlocks;
 import com.hypixel.hytale.protocol.packets.world.SetBlockCmd;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
-import com.hypixel.hytale.server.core.universe.world.chunk.section.BlockSection;
+import com.hypixel.hytale.server.core.universe.world.accessor.SectionReader;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -44,6 +43,8 @@ final class FakeBlockSender {
         }
         Map<Long, List<SetBlockCmd>> bySection = new HashMap<>();
         Map<Long, int[]> sectionCoords = new HashMap<>();
+        WorldAccess access = new WorldAccess(world);
+        SectionReader.SectionCursor cursor = access.sectionCursor();
         for (Edit edit : edits) {
             int blockId = edit.blockId();
             int filler = 0;
@@ -51,14 +52,12 @@ final class FakeBlockSender {
             int local = ChunkUtil.indexBlock(edit.x() & ChunkUtil.SIZE_MASK, edit.y() & ChunkUtil.SIZE_MASK,
                     edit.z() & ChunkUtil.SIZE_MASK);
             if (blockId == REAL) {
-                WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(edit.x(), edit.z()));
-                if (chunk == null) {
+                if (!access.isTicking(edit.x(), edit.z()) || !cursor.moveTo(edit.x(), edit.y(), edit.z())) {
                     continue; // The chunk is gone from the server; the client gets the real chunk when it loads again.
                 }
-                BlockSection section = chunk.getBlockChunk().getSectionAtBlockY(edit.y());
-                blockId = section.get(local);
-                filler = section.getFiller(local);
-                rotation = section.getRotationIndex(local);
+                blockId = cursor.block();
+                filler = cursor.filler();
+                rotation = cursor.rotation();
             }
             int sx = ChunkUtil.chunkCoordinate(edit.x());
             int sy = ChunkUtil.chunkCoordinate(edit.y());

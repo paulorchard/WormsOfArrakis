@@ -7,7 +7,6 @@ import com.hypixel.hytale.server.core.asset.type.blocktype.config.BlockType;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import org.joml.Vector3d;
 
@@ -122,17 +121,17 @@ final class SinkJob implements WormTestSystem.Job {
         Vector3d centreCell = new Vector3d(cx + 0.5, at.y, cz + 0.5);
         SinkJob job = new SinkJob(world, viewers, options, schedule, centreCell, sunk, layer, shake);
         Map<Long, Object> claims = CLAIMS.computeIfAbsent(world, w -> new HashMap<>());
+        WorldAccess access = new WorldAccess(world);
         for (SinkSchedule.Cell plan : schedule.cells) {
             int x = cx + plan.dx;
             int z = cz + plan.dz;
-            WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
-            if (chunk == null) {
+            if (!access.isTicking(x, z)) {
                 continue;
             }
-            int top = chunk.getHeight(x & ChunkUtil.SIZE_MASK, z & ChunkUtil.SIZE_MASK);
+            int top = access.height(x, z);
             // The same surface rule as the wave ripple, but nobody is skipped for standing there: the sunk block
             // keeps its collision and the layers have none.
-            if (!sand.contains(chunk.getBlock(x, top, z)) || chunk.getBlock(x, top + 1, z) != 0) {
+            if (top == WorldAccess.NO_HEIGHT || !sand.contains(access.block(x, top, z)) || access.block(x, top + 1, z) != 0) {
                 continue;
             }
             job.cells.add(new Cell(plan, x, top, z));

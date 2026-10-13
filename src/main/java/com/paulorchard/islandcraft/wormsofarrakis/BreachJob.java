@@ -65,6 +65,9 @@ final class BreachJob implements WormTestSystem.Job {
     /** Everyone caught in the swallow zone, and the camera of everyone near. */
     private final BreachHold hold = new BreachHold();
     private final BreachCamera camera = new BreachCamera();
+    /** The mobs and totems caught in the same zone, and the entity the breach is for (a mob or totem target), or null. */
+    private final BreachEntities beings;
+    private UUID entityTarget;
     private boolean captured;
     private boolean sinking;
     private boolean bottomBurst;
@@ -86,6 +89,7 @@ final class BreachJob implements WormTestSystem.Job {
         this.centre = centre;
         this.heading = heading;
         this.config = config;
+        this.beings = new BreachEntities(fx.core());
         WormsOfArrakisConfig cfg = config.get();
         this.scale = (float) cfg.getBreachWormSize();
         this.wormHeight = WormJob.HEIGHT * scale;
@@ -177,7 +181,14 @@ final class BreachJob implements WormTestSystem.Job {
     public void abort(Store<EntityStore> store) {
         removeWorm(store);
         hold.releaseAll(world, store);
+        beings.releaseAll(world, store);
         camera.resetAll();
+    }
+
+    /** The breach is for a mob or a totem (possibly already gone): it is caught wherever it is, and killed if the hold is off. */
+    BreachJob forEntity(UUID id) {
+        this.entityTarget = id;
+        return this;
     }
 
     // ------------------------------------------------------------------ the beats
@@ -353,6 +364,10 @@ final class BreachJob implements WormTestSystem.Job {
         if (cfg.isBreachHold()) {
             return; // the kill comes at BreachKillAt, once the worm is under the sand
         }
+        if (victim == null && entityTarget != null) {
+            beings.killOne(store, cfg, entityTarget);
+            return;
+        }
         if (victim == null || victimRef == null || !victimRef.isValid() || killed.contains(victim.getUuid())) {
             return;
         }
@@ -386,11 +401,13 @@ final class BreachJob implements WormTestSystem.Job {
         if (!captured && t >= cfg.getBreachWormAt()) {
             captured = true;
             hold.capture(world, store, centre, wormRadius * cfg.getBreachSwallowZoneFactor(), victim);
+            beings.capture(world, store, centre, wormRadius * cfg.getBreachSwallowZoneFactor(), entityTarget);
         }
         if (!captured || zoneDone) {
             return;
         }
         hold.tick(world, store);
+        beings.tick(store);
         double depth = cfg.getBreachSinkDepth();
         BreachHold.Devour devourOne = (s, ref, id) -> {
             if (!killed.contains(id)) {
@@ -404,6 +421,7 @@ final class BreachJob implements WormTestSystem.Job {
         if (sinking && returnStart < 0) {
             double q = Math.min(1, (t - sinkAt) / sinkSeconds);
             hold.sinkTo(world, store, depth, q);
+            beings.sinkTo(world, store, depth, q);
             if (!bottomBurst && q >= 1) {
                 bottomBurst = true;
                 sinkBursts(store, cfg, false);
@@ -414,19 +432,23 @@ final class BreachJob implements WormTestSystem.Job {
             if (q <= 0) {
                 zoneDone = true;
                 hold.releaseAndHurt(world, store, devourOne);
+                beings.releaseAndHurt(world, store, cfg);
                 return;
             }
             hold.sinkTo(world, store, depth, q);
+            beings.sinkTo(world, store, depth, q);
         }
         if (returnStart < 0 && t >= killAt) {
             if (cfg.isDevourKills()) {
                 zoneDone = true;
                 hold.kill(world, store, devourOne);
+                beings.kill(world, store, cfg);
             } else if (sinking) {
                 returnStart = t;
             } else {
                 zoneDone = true;
                 hold.releaseAndHurt(world, store, devourOne);
+                beings.releaseAndHurt(world, store, cfg);
             }
         }
     }
@@ -434,6 +456,7 @@ final class BreachJob implements WormTestSystem.Job {
     /** The sink begins: the dust and the shake, and the camera of everyone sinking is fixed where it is. */
     private void startSink(Store<EntityStore> store, WormsOfArrakisConfig cfg) {
         hold.startSink(store);
+        beings.startSink(store);
         sinkBursts(store, cfg, true);
         for (PlayerRef p : hold.sunkPlayersNow()) {
             Vector3d surface = hold.surfaceOf(p);

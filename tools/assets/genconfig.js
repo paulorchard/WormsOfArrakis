@@ -2,28 +2,21 @@
 const fs = require('fs');
 const file = 'src/main/java/com/paulorchard/islandcraft/wormsofarrakis/WormsOfArrakisConfig.java';
 const rows = [
-  ['PathEaseExponent', 'double', 2.0, 'The worm speeds up as it nears: progress = (time / stalk time) raised to this. 1 is constant speed.'],
-  ['WormsignViewDistance', 'double', 220, 'Blocks. Players this close to the worm see its trail.'],
-  ['WormsignTrailInterval', 'double', 0.25, 'Seconds between trail dust along the path.'],
-  ['WormsignPuffInterval', 'double', 1.5, 'Seconds between the puffs of sand thrown up from the trail.'],
-  ['WormsignScale', 'double', 3.0, 'Particle scale of the trail.'],
-  ['RumbleBystanderVolume', 'double', 0.7, 'Volume (1 = full) for players near the target who are not the target. Flat.'],
-  ['RumbleTargetStartVolume', 'double', 0.3, 'The target hears this at the start of STALKING, rising to RumbleTargetVolume.'],
-  ['RumbleTargetVolume', 'double', 1.0, 'Volume the target hears at the end of STALKING and in LOCKED.'],
-  ['RumbleTargetEndPitch', 'double', 0.85, 'Pitch multiplier the target hears at the end of STALKING (1 at the start).'],
+  ['WormsignViewDistance', 'double', 220, 'Blocks. Players this close see the dust trail the breach worm leaves as it dives away.'],
+  ['WormsignTrailInterval', 'double', 0.25, 'Seconds between trail dust as the breach worm dives away.'],
+  ['WormsignScale', 'double', 3.0, 'Particle scale of that trail.'],
+  ['RumbleBystanderVolume', 'double', 0.7, 'Volume (1 = full) for players near the trigger who are not in the list. Flat.'],
+  ['RumbleTargetStartVolume', 'double', 0.3, 'Everyone in the list hears this at the start of STALKING, rising to RumbleTargetVolume.'],
+  ['RumbleTargetVolume', 'double', 1.0, 'Volume the list hears at the end of STALKING and in LOCKED.'],
+  ['RumbleTargetEndPitch', 'double', 0.85, 'Pitch multiplier the list hears at the end of STALKING (1 at the start).'],
   ['RumbleIntervalSeconds', 'double', 3.0, 'The rumble sounds are played again this often (shorter than the sounds, so they overlap).'],
-  ['RippleSeconds', 'double', 15, 'The target ripple starts this long before LOCKED.'],
-  ['RippleStartInterval', 'double', 4, 'Seconds between ripples when they start.'],
-  ['RippleEndInterval', 'double', 1, 'Seconds between ripples at the start of LOCKED.'],
-  ['RippleViewDistance', 'double', 30, 'Blocks. Players this close to the target also see the ripple.'],
+  ['RippleStartInterval', 'double', 4, 'Only /worm preview ripple uses this now: seconds between ripples at its start.'],
+  ['RippleEndInterval', 'double', 1, 'Only /worm preview ripple uses this now: seconds between ripples at its end.'],
+  ['RippleViewDistance', 'double', 30, 'Blocks. Players this close to a rippled being also see the ripple.'],
   ['LockedRippleInterval', 'double', 0.2, 'Seconds between the tight, quick ripples round the target during LOCKED.'],
-  ['VignetteSeconds', 'double', 15, 'The vignette fades in over this long before LOCKED.'],
-  ['VignetteStalkLevel', 'double', 0.5, 'Vignette strength (0 to 1) reached at the end of STALKING; LOCKED goes on to 1.'],
   ['VignetteStrength', 'double', 1.0, 'Overall multiplier on the vignette (0 turns it off).'],
   ['CameraShake', 'boolean', true, 'Turn the target camera shake off by setting false.'],
-  ['ShakeSeconds', 'double', 15, 'The tremble starts this long before LOCKED.'],
   ['ShakeStrength', 'double', 1.0, 'Overall multiplier on the camera shake intensity.'],
-  ['BystanderShakeRange', 'double', 30, 'Blocks. A bystander this close to the worm gets one shake pulse.'],
   ['SlowFloor', 'double', 0.15, 'Share of normal speed the target is slowed to by the end of LOCKED.'],
   ['SlowJumpFloor', 'double', 0.5, 'Share of normal jump force the target is down to by the end of LOCKED (needs SlowMethod effect or settings both working).'],
   ['SlowMethod', 'string', 'effect', 'effect: entity effects with a horizontal speed multiplier in steps. settings: MovementManager settings, smooth. Jump force always uses settings.'],
@@ -60,11 +53,8 @@ const rows = [
   ["ZoomWormHeightFactor","double",0.6667,"The pulled-out camera distance is this times the worm height (10 blocks times BreachWormSize), up to ZoomMaxDistance."],
   ["ZoomMaxDistance","double",60,"Blocks. The longest the pulled-out camera distance can be."],
   ["BreachCameraMode","string","distance","distance: pull the player camera back. fixed: a camera placed on the player side of the worm, aimed at it."],
-  ["WormStartCandidates","double",48,"How many candidate start points are sampled in the WormStartMinDistance to WormStartMaxDistance ring."],
-  ["WormStartOpenRadius","double",4,"Blocks. A start point counts only if every surface block this close is sand."],
-  ["WormStartHeightTolerance","double",2,"Blocks. The start is a random one among the qualifying points this close to the highest."],
-  ["StartBoomDustScale","double",3,"Particle scale of the dust burst at the worm start point when an event begins."],
-  ["StartRippleDelay","double",1,"Seconds after the start boom that everyone near, standing on sand, feels the warning ripple."],
+  ["StartBoomDustScale","double",3,"Particle scale of the dust burst at the trigger being's feet when an event begins."],
+  ["StartRippleDelay","double",1,"Seconds after the start boom that everyone in the list who stands on sand feels the warning ripple."],
   ["BreachRippleMaxRings","double",8,"Most rings the breach heave is allowed (it uses ceil of the worm radius, so 8 is a 17 by 17 patch)."],
   ["BreachLiftsVictim","boolean",false,"Lift the victim up with the worm before the swallow (the old behaviour). Off by default."],
   ['RippleShake','boolean',true,'Sink-and-rebound ripple: a small camera shake on the first drop and on the first two rebound peaks.'],
@@ -97,11 +87,29 @@ const rows = [
   ["DisturbanceMaxCost","double",6000,"The fallback is also used if columns times viewers is above this (a full chunk is 1024 columns)."],
   ["DisturbanceFallbackSeconds","double",2.0,"In the fallback the event ends this many seconds after it started (or at once if that is past)."],
 
+  ["MovementAggroPerBlock","double",1.0,"Aggro per horizontal block moved on sand, flat for walking, running, sprinting and jumping."],
+  ["StaminaAggroFactor","double",1.0,"Aggro added per point of stamina spent on sand (only decreases count; regeneration is ignored). 0 turns it off."],
+  ["StalkBaseSeconds","double",45,"Stalk length is max(StalkMinSeconds, StalkBaseSeconds - StalkStepSeconds * players in the list)."],
+  ["StalkStepSeconds","double",5,"Seconds taken off the stalk for each player in the list."],
+  ["StalkMinSeconds","double",15,"The shortest stalk."],
+  ["EntityStalkSeconds","double",10,"Stalk length when the being that triggered the event is not a player (the target is then that being)."],
+  ["StalkPulseSeconds","double",5.0,"Every listed being on sand gets a ripple, a stumble and a small shake this often during STALKING."],
+  ["StumbleSeconds","double",0.6,"How long the stumble (a brief near-stop) lasts."],
+  ["StumbleSlowPercent","double",10,"Speed left during the stumble, in percent (the nearest Arrakis_Worm_Slow_<percent> asset, 10 to 95 in steps of 5)."],
+  ['MobTrackRadius', 'double', 200, 'Blocks. A hostile mob is tracked (and gains aggro) only while it is this close to at least one player, or while it is in an event. 0 means GroupRadius.'],
+  ['MobAggroMultiplier', 'double', 0.25, 'A mob gains this share of what a player gains for the same distance on sand (0.25: about 400 blocks to reach 100).'],
+  ['MobRoleDeny', 'strings', [], 'NPC role names that are never counted as mobs, whatever their attitude.'],
+  ['MobRoleAllow', 'strings', [], 'NPC role names that are always counted as mobs, whatever their attitude.'],
+  ['TotemDeployableIds', 'strings', ['Slowness_Totem', 'Healing_Totem'], 'Deployable config ids that count as totems (decoys). Other mods add theirs with WormAggro.registerTotem; /worm totem add edits it for the session.'],
+  ['TotemStartAggro', 'double', 100, 'Aggro a totem has the moment it lands on sand.'],
+  ['TotemAggroPerSecond', 'double', 5, 'Aggro a totem gains per second for as long as it exists.'],
+  ['DevourMobDrops', 'boolean', false, 'False: a mob the worm swallows is removed so that it drops nothing. True: it is killed and drops its loot as usual.'],
+  ["LockedSeconds","double",5,"LOCKED phase length: the target is slowed, the vignette rises and the camera pulls out, then the breach. Replaces LockSeconds (default 4), which saved configs still hold."],
 ];
 const camel = (n) => n[0].toLowerCase() + n.slice(1);
-const jt = { double: 'double', boolean: 'boolean', string: 'String' };
-const codec = { double: 'Codec.DOUBLE', boolean: 'Codec.BOOLEAN', string: 'Codec.STRING' };
-const lit = (r) => r[1] === 'string' ? `"${r[2]}"` : String(r[2]);
+const jt = { double: 'double', boolean: 'boolean', string: 'String', strings: 'String[]' };
+const codec = { double: 'Codec.DOUBLE', boolean: 'Codec.BOOLEAN', string: 'Codec.STRING', strings: 'Codec.STRING_ARRAY' };
+const lit = (r) => r[1] === 'string' ? `"${r[2]}"` : r[1] === 'strings' ? `{${r[2].map((x) => JSON.stringify(x)).join(', ')}}` : String(r[2]);
 let fields = '', getters = '', codecs = '';
 for (const r of rows) {
   const f = camel(r[0]);

@@ -13,7 +13,6 @@ import com.hypixel.hytale.server.core.modules.entity.component.HeadRotation;
 import com.hypixel.hytale.server.core.modules.entity.component.TransformComponent;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import org.joml.Vector3d;
 
@@ -47,6 +46,7 @@ public class WormTestCommand extends AbstractCommandCollection {
         addSubCommand(Positional.build("burst", LANG + "burst.desc", this::burst, "scale", "variant"));
         addSubCommand(Positional.build("rumble", LANG + "rumble.desc", this::rumble, "seconds", "combo", "pitch"));
         addSubCommand(new WormSelfTest(sand));
+        addSubCommand(new EntityProbe(sand));
         addSubCommand(Positional.build("speed", LANG + "speed.desc", this::speed, "seconds"));
     }
 
@@ -247,10 +247,9 @@ public class WormTestCommand extends AbstractCommandCollection {
             return;
         }
         // Spawn where the ground is, not where the player's feet are, in case they are in the air.
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(feet.x, feet.z));
-        if (chunk != null) {
-            feet.y = chunk.getHeight((int) Math.floor(feet.x) & ChunkUtil.SIZE_MASK,
-                    (int) Math.floor(feet.z) & ChunkUtil.SIZE_MASK) + 1;
+        int ground = WorldAccess.groundHeight(world, feet.x, feet.z);
+        if (ground != WorldAccess.NO_HEIGHT) {
+            feet.y = ground + 1;
         }
         system.stop(player.getUuid(), "worm");
         WormJob job = WormJob.spawn(world, store, player, feet, head.getDirection(), scale, persist);
@@ -283,9 +282,9 @@ public class WormTestCommand extends AbstractCommandCollection {
         double x = p.x + (len < 1e-6 ? 0 : dir.x / len * 10);
         double z = p.z + (len < 1e-6 ? 1 : dir.z / len * 10);
         double y = p.y;
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
-        if (chunk != null) {
-            y = chunk.getHeight((int) Math.floor(x) & ChunkUtil.SIZE_MASK, (int) Math.floor(z) & ChunkUtil.SIZE_MASK) + 1;
+        int ground = WorldAccess.groundHeight(world, x, z);
+        if (ground != WorldAccess.NO_HEIGHT) {
+            y = ground + 1;
         }
         final double fy = y;
         final double fx = x;

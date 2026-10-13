@@ -6,7 +6,6 @@ import com.hypixel.hytale.math.util.ChunkUtil;
 import com.hypixel.hytale.server.core.universe.PlayerRef;
 import com.hypixel.hytale.server.core.universe.world.SetBlockSettings;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import org.joml.Vector3d;
 
@@ -275,7 +274,7 @@ final class SandDisturbance {
     }
 
     private void rumbleStep(float dt, Store<EntityStore> store, WormsOfArrakisConfig cfg) {
-        if (world.getChunkIfLoaded(ChunkUtil.indexChunk(cx, cz)) == null) {
+        if (!new WorldAccess(world).isTickingChunk(cx, cz)) {
             info("Sand disturbance %d,%d: the chunk was unloaded; the rumble stops here", cx, cz);
             rumble.end();
             rumble = null;
@@ -318,6 +317,7 @@ final class SandDisturbance {
     /** Everyone in the chunk standing on Arrakis_Sand or a placed block is held. Decided once, now. */
     private void capture(Store<EntityStore> store) {
         WormsOfArrakisConfig cfg = cfg();
+        WorldAccess access = new WorldAccess(world);
         int depthBelow = (int) Math.ceil(cfg.getSandTolerance()) + 1;
         for (PlayerRef p : world.getPlayerRefs()) {
             Ref<EntityStore> ref = p.getReference();
@@ -328,14 +328,13 @@ final class SandDisturbance {
             }
             int x = (int) Math.floor(at.x);
             int z = (int) Math.floor(at.z);
-            WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
-            if (chunk == null) {
+            if (!access.isTicking(x, z)) {
                 continue;
             }
             int top = (int) Math.floor(at.y - 0.1);
             boolean caught = false;
             for (int y = top; y >= top - depthBelow && y >= ChunkUtil.MIN_Y; y--) {
-                int id = chunk.getBlock(x, y, z);
+                int id = access.block(x, y, z);
                 if (id != 0) {
                     caught = id == sandId || tracker.isTracked(world.getName(), x, y, z);
                     break;
@@ -356,12 +355,12 @@ final class SandDisturbance {
         }
         int x = (int) Math.floor(at.x);
         int z = (int) Math.floor(at.z);
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(x, z));
-        if (chunk == null) {
+        WorldAccess access = new WorldAccess(world);
+        if (!access.isTicking(x, z)) {
             return fallbackDepth;
         }
         for (int y = (int) Math.floor(at.y - 0.1); y >= Math.max(ChunkUtil.MIN_Y, (int) at.y - 256); y--) {
-            if (chunk.getBlock(x, y, z) == sandId) {
+            if (access.block(x, y, z) == sandId) {
                 return Math.max(0, at.y - (y + 1)) + fallbackDepth;
             }
         }
@@ -403,13 +402,15 @@ final class SandDisturbance {
         List<Ref<EntityStore>> refs = WormEffects.refs(hearers);
         float far = (float) cfg.getGroupRadius() + 60f;
         float dust = (float) cfg.getDisturbanceDustScale();
-        WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunk(cx, cz));
+        WorldAccess access = new WorldAccess(world);
+        boolean loaded = access.isTickingChunk(cx, cz);
         // The ring on the surface round the middle of the chunk.
         for (int k = 0; k < 24; k++) {
             double a = k * Math.PI * 2 / 24;
             double x = centreX() + Math.cos(a) * 15;
             double z = centreZ() + Math.sin(a) * 15;
-            double y = chunk == null ? 64 : chunk.getHeight((int) Math.floor(x) & ChunkUtil.SIZE_MASK, (int) Math.floor(z) & ChunkUtil.SIZE_MASK) + 1.0;
+            int ground = loaded ? access.height((int) Math.floor(x), (int) Math.floor(z)) : WorldAccess.NO_HEIGHT;
+            double y = ground == WorldAccess.NO_HEIGHT ? 64 : ground + 1.0;
             WormEffects.particle(store, "Block_Break_Dust", x, y + 0.4, z, dust, far, refs);
             WormEffects.particle(store, "Block_Land_Hard_Dust", x, y + 0.3, z, dust * 0.8f, far, refs);
         }
@@ -458,13 +459,13 @@ final class SandDisturbance {
         List<PlacedBlockTracker.Placed> list = new ArrayList<>(record.blocks.values());
         list.sort((a, b) -> Integer.compare(b.y, a.y));
         int removed = 0, gone = 0, changed = 0, unloaded = 0, failed = 0;
+        WorldAccess access = new WorldAccess(world);
         for (PlacedBlockTracker.Placed b : list) {
-            WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(b.x, b.z));
-            if (chunk == null) {
+            if (!access.isTicking(b.x, b.z)) {
                 unloaded++;
                 continue;
             }
-            int id = chunk.getBlock(b.x, b.y, b.z);
+            int id = access.block(b.x, b.y, b.z);
             if (id == 0) {
                 gone++;
                 continue;
@@ -474,7 +475,7 @@ final class SandDisturbance {
                 continue;
             }
             try {
-                if (chunk.breakBlock(b.x, b.y, b.z, fillerAt(chunk, b.x, b.y, b.z), REMOVE_FLAGS)) {
+                if (access.remove(b.x, b.y, b.z, REMOVE_FLAGS)) {
                     removed++;
                 } else {
                     failed++;
@@ -487,12 +488,6 @@ final class SandDisturbance {
         removedCount = removed;
         info("Sand disturbance %d,%d: removed %d of %d placed block(s) in %.2f ms (%d already gone, %d changed to something else and left alone, %d in unloaded chunks skipped, %d failed)",
                 cx, cz, removed, list.size(), (System.nanoTime() - t0) / 1e6, gone, changed, unloaded, failed);
-    }
-
-    /** The filler value of a block (non-zero for the parts of a multi-block block that are not its origin). */
-    private static int fillerAt(WorldChunk chunk, int x, int y, int z) {
-        return chunk.getBlockChunk().getSectionAtBlockY(y).getFiller(ChunkUtil.indexBlock(x & ChunkUtil.SIZE_MASK,
-                y & ChunkUtil.SIZE_MASK, z & ChunkUtil.SIZE_MASK));
     }
 
     // ------------------------------------------------------------------ the end

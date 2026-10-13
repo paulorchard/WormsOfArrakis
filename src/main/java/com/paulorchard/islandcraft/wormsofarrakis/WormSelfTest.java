@@ -11,7 +11,6 @@ import com.hypixel.hytale.server.core.asset.type.weather.config.Weather;
 import com.hypixel.hytale.server.core.command.system.CommandContext;
 import com.hypixel.hytale.server.core.command.system.basecommands.AbstractWorldCommand;
 import com.hypixel.hytale.server.core.universe.world.World;
-import com.hypixel.hytale.server.core.universe.world.chunk.WorldChunk;
 import com.hypixel.hytale.server.core.universe.world.storage.EntityStore;
 import org.joml.Vector3d;
 
@@ -51,10 +50,10 @@ final class WormSelfTest extends AbstractWorldCommand {
         }
         final int originX = ox;
         final int originZ = oz;
-        List<CompletableFuture<WorldChunk>> loads = new ArrayList<>();
+        List<CompletableFuture<com.hypixel.hytale.component.Ref<com.hypixel.hytale.server.core.universe.world.storage.ChunkStore>>> loads = new ArrayList<>();
         for (int cx = ChunkUtil.chunkCoordinate(ox) - 1; cx <= ChunkUtil.chunkCoordinate(ox) + 1; cx++) {
             for (int cz = ChunkUtil.chunkCoordinate(oz) - 1; cz <= ChunkUtil.chunkCoordinate(oz) + 1; cz++) {
-                loads.add(world.getChunkAsync(ChunkUtil.indexChunk(cx, cz)));
+                loads.add(WorldAccess.loadColumn(world, cx, cz, true));
             }
         }
         CompletableFuture.allOf(loads.toArray(new CompletableFuture[0]))
@@ -120,6 +119,9 @@ final class WormSelfTest extends AbstractWorldCommand {
         if (EntityEffect.getAssetMap().getAsset(BreachHold.HOLD) == null) {
             missing.add("effect " + BreachHold.HOLD);
         }
+        if (EntityEffect.getAssetMap().getAsset(BreachEntities.FREEZE) == null) {
+            missing.add("effect " + BreachEntities.FREEZE);
+        }
         if (WormDevourDamage.cause() == null) {
             missing.add("damage cause " + WormDevourDamage.CAUSE_ID);
         }
@@ -133,17 +135,17 @@ final class WormSelfTest extends AbstractWorldCommand {
 
         // Find a sand column near the origin.
         Vector3d spot = null;
+        WorldAccess access = new WorldAccess(world);
         for (int r = 0; r < 24 && spot == null; r++) {
             for (int dx = -r; dx <= r && spot == null; dx++) {
                 for (int dz = -r; dz <= r && spot == null; dz++) {
-                    WorldChunk chunk = world.getChunkIfLoaded(ChunkUtil.indexChunkFromBlock(originX + dx, originZ + dz));
-                    if (chunk == null) {
-                        continue;
-                    }
                     int bx = originX + dx;
                     int bz = originZ + dz;
-                    int top = chunk.getHeight(bx & ChunkUtil.SIZE_MASK, bz & ChunkUtil.SIZE_MASK);
-                    if (sand.get().contains(chunk.getBlock(bx, top, bz))) {
+                    if (!access.isTicking(bx, bz)) {
+                        continue;
+                    }
+                    int top = access.height(bx, bz);
+                    if (top != WorldAccess.NO_HEIGHT && sand.get().contains(access.block(bx, top, bz))) {
                         spot = new Vector3d(bx + 0.5, top + 1, bz + 0.5);
                     }
                 }
@@ -156,7 +158,12 @@ final class WormSelfTest extends AbstractWorldCommand {
         say(context, "using sand at " + spot);
 
         sinkChecks(context, world, store, spot);
-        startFinderChecks(context, world, spot);
+        say(context, "stumble: effect " + StumbleFx.effectId(WormsOfArrakisPlugin.get().config().getStumbleSlowPercent()) + " for "
+                + WormsOfArrakisPlugin.get().config().getStumbleSeconds() + " s, asset "
+                + (EntityEffect.getAssetMap().getAsset(StumbleFx.effectId(WormsOfArrakisPlugin.get().config().getStumbleSlowPercent())) != null ? "found. OK" : "MISSING"));
+
+        EventSelfTest.run(text -> say(context, text), world, store, spot);
+        MultiplierSelfTest.run(text -> say(context, text), store, spot);
 
         for (boolean persist : new boolean[] {false, true}) {
             WormJob worm = WormJob.spawn(world, store, null, spot, new Vector3d(0, 0, 1), 1.0f, persist);
@@ -187,25 +194,6 @@ final class WormSelfTest extends AbstractWorldCommand {
         say(context, "breach: ran " + breachTicks + " ticks (" + String.format(java.util.Locale.ROOT, "%.1f", breachTicks / 30.0) + " s), worm removed. OK");
         DisturbanceSelfTest.run(text -> say(context, text), world, store, spot);
         say(context, "selftest finished: all checks passed");
-    }
-
-    /** The start-point search from the spawn: how often each rule is used and what it costs. Only chunks the headless server has loaded count. */
-    private void startFinderChecks(CommandContext context, World world, Vector3d spot) {
-        java.util.Map<String, Integer> rules = new java.util.TreeMap<>();
-        int sampled = 0;
-        int unloaded = 0;
-        double millis = 0;
-        int runs = 10;
-        for (int i = 0; i < runs; i++) {
-            WormStartFinder.Result r = WormStartFinder.find(world, spot, WormsOfArrakisPlugin.get().config(), sand.get(), new java.util.Random(i));
-            rules.merge(r.rule, 1, Integer::sum);
-            sampled += r.sampled;
-            unloaded += r.unloaded;
-            millis += r.millis;
-        }
-        say(context, String.format(java.util.Locale.ROOT,
-                "start finder: %d runs from the spawn, rules %s, %d of %d candidates in unloaded chunks, %.1f ms per search",
-                runs, rules, unloaded, sampled, millis / runs));
     }
 
     private void sinkChecks(CommandContext context, World world, Store<EntityStore> store, Vector3d spot) {

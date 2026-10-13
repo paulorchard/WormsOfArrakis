@@ -23,7 +23,7 @@ import java.util.function.Supplier;
 
 /**
  * /worm status | aggro [player] | add player amount | trigger [player|self] [stalkSeconds] [lockSeconds] |
- * stop [player] | ignore player. No permission group is set, so only operators can run it.
+ * stop [player] | ignore player | preview | breach | sink | disturb. No permission group is set, so only operators can run it.
  */
 public class WormCommand extends AbstractCommandCollection {
 
@@ -53,6 +53,7 @@ public class WormCommand extends AbstractCommandCollection {
         addSubCommand(WorldPositional.build("breach", LANG + "breach.desc", this::breach, "target"));
         addSubCommand(WorldPositional.build("sink", LANG + "sink.desc", this::sink, "wait", "depth", "delay"));
         addSubCommand(WorldPositional.build("disturb", LANG + "disturb.desc", this::disturb, "action", "arg"));
+        addSubCommand(WorldPositional.build("totem", LANG + "totem.desc", this::totem, "action", "id"));
         addSubCommand(WorldPositional.build("stop", LANG + "stop.desc", this::stop, "player"));
         addSubCommand(WorldPositional.build("ignore", LANG + "ignore.desc", this::ignore, "player"));
     }
@@ -102,34 +103,63 @@ public class WormCommand extends AbstractCommandCollection {
             say(context, "status.none");
         }
         for (WormEvent e : all) {
+            Vector3d o = e.getOrigin();
+            BeingAggro t = manager.state(e.getTrigger());
+            int players = 0;
+            for (UUID id : e.getList()) {
+                BeingAggro m = manager.state(id);
+                if (m != null && m.kind == BeingKind.PLAYER) {
+                    players++;
+                }
+            }
+            String why = e.isGuaranteed() ? "entity trigger, " + num(config.get().getEntityStalkSeconds()) + "s whatever the list"
+                    : "player trigger, " + players + " player(s) in the list";
             say(context, "status.event", "id", String.valueOf(e.getId()), "phase", e.getPhase().name(),
-                    "seconds", num(e.getSecondsLeft()), "target", WormEventLog.name(manager, e.getTarget()),
-                    "world", e.getWorldName(), "group", WormEventLog.names(manager, e.getGroup()),
-                    "worm", position(e));
+                    "seconds", num(e.getSecondsLeft()), "stalk", num(e.getStalkSeconds()), "why", why,
+                    "trigger", WormEventLog.name(manager, e.getTrigger()) + (t == null ? "" : " [" + t.kind + "]"),
+                    "target", e.getTarget() == null ? "not chosen yet" : WormEventLog.name(manager, e.getTarget()),
+                    "guaranteed", e.isGuaranteed() ? " (guaranteed)" : "",
+                    "world", e.getWorldName(), "origin", String.format(Locale.ROOT, "%.0f %.0f %.0f", o.x, o.y, o.z));
+            for (UUID id : e.getList()) {
+                BeingAggro a = manager.state(id);
+                say(context, "status.member", "name", WormEventLog.name(manager, id), "kind", a == null ? "gone" : a.kind.name(),
+                        "score", num(a == null ? 0 : a.score()), "sand", a != null && a.onSand ? "on sand" : "off sand",
+                        "factor", (a == null ? EffectMultipliers.Result.NONE : a.effectFactor).text());
+            }
         }
+        MobTracker mobs = manager.mobs();
+        say(context, "status.tracking", "mobs", String.valueOf(mobs.tracked), "hostile", String.valueOf(mobs.hostile),
+                "scanned", String.valueOf(mobs.scanned), "ms", String.format(Locale.ROOT, "%.2f", mobs.millis),
+                "max", String.format(Locale.ROOT, "%.2f", mobs.maxMillis), "totems", String.valueOf(manager.totems().active()),
+                "landed", String.valueOf(manager.totems().landed()));
         PlayerRef self = caller(context, store);
         if (self != null) {
             describe(context, self, true);
         }
     }
 
-    private static String position(WormEvent e) {
-        var p = e.getWormPosition();
-        return String.format(Locale.ROOT, "%.0f %.0f %.0f", p.x, p.y, p.z);
-    }
-
-    /** The score, the group total and (when {@code brief} is false) what feeds it. */
+    /** The score, the event it is in or the list it would start (display only), and when not {@code brief} what feeds it. */
     private void describe(CommandContext context, PlayerRef player, boolean brief) {
-        PlayerAggro a = manager.state(player.getUuid());
+        BeingAggro a = manager.state(player.getUuid());
         double score = a == null ? 0 : a.score();
         double threshold = config.get().getAggroThreshold();
-        List<GroupFinder.Member> group = manager.groupOf(player.getUuid());
-        WormEvent inEvent = events.eventOf(player.getUuid());
-        String groupText = inEvent != null
-                ? "in event #" + inEvent.getId() + " (" + inEvent.getPhase() + ")"
-                : group == null ? "no group (not eligible)"
-                : num(GroupFinder.total(group)) + " of " + num(threshold) + " with " + group.size() + " in group";
-        say(context, "aggro.line", "player", player.getUsername(), "score", num(score), "group", groupText,
+        WormEvent inEvent = a == null ? null : a.event;
+        String listText;
+        if (inEvent != null) {
+            listText = "in event #" + inEvent.getId() + " (" + inEvent.getPhase() + ")";
+        } else {
+            List<ListScan.Candidate> list = manager.listOf(player.getUuid());
+            if (list == null || !a.eligible) {
+                listText = "not eligible";
+            } else {
+                List<UUID> ids = new ArrayList<>();
+                for (ListScan.Candidate c : list) {
+                    ids.add(c.id());
+                }
+                listText = "of " + num(threshold) + "; would list " + ids.size() + " [" + WormEventLog.names(manager, ids) + "]";
+            }
+        }
+        say(context, "aggro.line", "player", player.getUsername(), "score", num(score), "group", listText,
                 "onSand", String.valueOf(a != null && a.onSand), "speed", num(a == null ? 0 : a.speed),
                 "ignored", manager.isIgnored(player.getUuid()) ? " (ignored)" : "");
         if (!brief && a != null) {
@@ -137,21 +167,82 @@ public class WormCommand extends AbstractCommandCollection {
             List<String> parts = new ArrayList<>();
             feeding.forEach((k, v) -> parts.add(k + " " + num(v)));
             say(context, "aggro.feeding", "sources", parts.isEmpty() ? "nothing" : String.join(", ", parts));
+            say(context, "aggro.factor", "factor", a.effectFactor.text());
         }
     }
 
     // ------------------------------------------------------------------ aggro, add, ignore
 
     private void aggro(CommandContext context, World world, Store<EntityStore> store, String[] args) {
+        if (args.length > 0 && (args[0].equalsIgnoreCase("mobs") || args[0].equalsIgnoreCase("totems"))) {
+            beings(context, world, store, args[0].equalsIgnoreCase("mobs") ? BeingKind.MOB : BeingKind.TOTEM);
+            return;
+        }
         PlayerRef player = resolve(context, store, args, 0);
         if (player != null) {
             describe(context, player, false);
         }
     }
 
+    /** The mobs or totems tracked near the caller (or in the world, from the console), nearest first, with their scores. */
+    private void beings(CommandContext context, World world, Store<EntityStore> store, BeingKind kind) {
+        PlayerRef self = caller(context, store);
+        Vector3d from = self == null ? null : WormEffects.position(store, self);
+        List<BeingAggro> list = new ArrayList<>();
+        for (BeingAggro b : manager.core().all()) {
+            if (b.kind == kind && world.getName().equals(b.world)) {
+                list.add(b);
+            }
+        }
+        list.sort((x, y) -> Double.compare(from == null ? 0 : x.position.distance(from), from == null ? 0 : y.position.distance(from)));
+        say(context, "aggro.beings", "count", String.valueOf(list.size()), "kind", kind == BeingKind.MOB ? "hostile mobs" : "totems");
+        int shown = 0;
+        for (BeingAggro b : list) {
+            if (shown++ >= 25) {
+                break;
+            }
+            say(context, "aggro.being", "name", WormEventLog.name(manager, b.id), "score", num(b.score()),
+                    "distance", from == null ? "?" : num(b.position.distance(from)), "sand", b.onSand ? "on sand" : "off sand",
+                    "event", b.event == null ? "free" : "in event #" + b.event.getId());
+        }
+    }
+
+    /** The nearest tracked being of this kind (and role or deployable id, if given) to the caller; null from the console. */
+    private BeingAggro nearest(CommandContext context, World world, Store<EntityStore> store, BeingKind kind, String label) {
+        PlayerRef self = caller(context, store);
+        Vector3d from = self == null ? null : WormEffects.position(store, self);
+        if (from == null) {
+            say(context, "needPlayer");
+            return null;
+        }
+        BeingAggro best = null;
+        for (BeingAggro b : manager.core().all()) {
+            if (b.kind != kind || !b.eligible || !world.getName().equals(b.world) || b.event != null
+                    || (label != null && !label.equalsIgnoreCase(b.label))) {
+                continue;
+            }
+            if (best == null || b.position.distance(from) < best.position.distance(from)) {
+                best = b;
+            }
+        }
+        if (best == null) {
+            say(context, "nearest.none", "kind", kind.name().toLowerCase(Locale.ROOT));
+        }
+        return best;
+    }
+
     private void add(CommandContext context, World world, Store<EntityStore> store, String[] args) {
         if (args.length < 2) {
             say(context, "add.usage");
+            return;
+        }
+        if (args[0].equalsIgnoreCase("mob") || args[0].equalsIgnoreCase("totem")) {
+            BeingAggro b = nearest(context, world, store, args[0].equalsIgnoreCase("mob") ? BeingKind.MOB : BeingKind.TOTEM, null);
+            if (b != null) {
+                double amount = parse(args[1], 0);
+                manager.core().add(b, amount, "command");
+                say(context, "add.done", "player", WormEventLog.name(manager, b.id), "amount", num(amount), "score", num(b.score()));
+            }
             return;
         }
         PlayerRef player = resolve(context, store, args, 0);
@@ -209,34 +300,67 @@ public class WormCommand extends AbstractCommandCollection {
     // ------------------------------------------------------------------ trigger, stop
 
     private void trigger(CommandContext context, World world, Store<EntityStore> store, String[] args) {
+        if (args.length > 0 && (args[0].equalsIgnoreCase("mob") || args[0].equalsIgnoreCase("totem"))) {
+            boolean mob = args[0].equalsIgnoreCase("mob");
+            BeingAggro b = nearest(context, world, store, mob ? BeingKind.MOB : BeingKind.TOTEM, args.length > 1 ? args[1] : null);
+            if (b != null) {
+                WormEvent event = manager.trigger(b, false, Double.NaN, Double.NaN);
+                say(context, "trigger.done", "id", String.valueOf(event.getId()), "target", WormEventLog.name(manager, b.id),
+                        "stalk", num(event.getStalkSeconds()), "lock", num(event.getLockSeconds()),
+                        "count", String.valueOf(event.getList().size()));
+            }
+            return;
+        }
+        trigger(context, store, args, false);
+    }
+
+    /** /worm totem add|remove|list [deployableId]: the registry of totem ids, for this session only. */
+    private void totem(CommandContext context, World world, Store<EntityStore> store, String[] args) {
+        String action = args.length > 0 ? args[0].toLowerCase(Locale.ROOT) : "list";
+        TotemRegistry registry = manager.totemRegistry();
+        switch (action) {
+            case "add" -> {
+                if (args.length < 2) {
+                    say(context, "totem.usage");
+                    return;
+                }
+                say(context, registry.register(args[1]) ? "totem.added" : "totem.already", "id", args[1]);
+            }
+            case "remove" -> {
+                if (args.length < 2) {
+                    say(context, "totem.usage");
+                    return;
+                }
+                say(context, registry.unregister(args[1]) ? "totem.removed" : "totem.unknown", "id", args[1]);
+            }
+            case "list" -> say(context, "totem.list", "ids", String.join(", ", registry.ids()));
+            default -> say(context, "totem.usage");
+        }
+    }
+
+    /** {@code solo} lists only that player (for /worm breach); otherwise the list is scanned as for a real trigger. */
+    private void trigger(CommandContext context, Store<EntityStore> store, String[] args, boolean solo) {
         PlayerRef player = resolve(context, store, args, 0);
         if (player == null) {
             return;
         }
         UUID id = player.getUuid();
         WormEvent existing = events.eventOf(id);
-        if (existing != null && existing.isActive()) {
+        if (existing != null) {
             say(context, "trigger.busy", "player", player.getUsername(), "phase", existing.getPhase().name());
             return;
         }
-        if (existing != null) {
-            events.stop(id); // /worm trigger ignores the cooldown
-        }
-        List<GroupFinder.Member> group = manager.groupOf(id);
-        PlayerAggro a = manager.state(id);
-        if (group == null || a == null) {
+        BeingAggro a = manager.state(id);
+        if (a == null || !a.eligible || a.world == null) {
             say(context, "trigger.ineligible", "player", player.getUsername());
             return;
         }
-        WormsOfArrakisConfig cfg = config.get();
-        WormEvent.Timings base = manager.defaultTimings(cfg);
-        double stalk = args.length > 1 ? parse(args[1], base.stalk()) : base.stalk();
-        double lock = args.length > 2 ? parse(args[2], base.lock()) : base.lock();
-        WormEvent.Timings timings = new WormEvent.Timings(stalk, lock, base.breach(), base.cooldown(),
-                base.retargetKeepsClock(), base.ease());
-        WormEvent event = manager.trigger(a.world, group, id, timings, true);
+        double stalk = args.length > 1 ? parse(args[1], Double.NaN) : Double.NaN;
+        double lock = args.length > 2 ? parse(args[2], Double.NaN) : Double.NaN;
+        WormEvent event = manager.trigger(a, solo, stalk, lock);
         say(context, "trigger.done", "id", String.valueOf(event.getId()), "target", player.getUsername(),
-                "stalk", num(stalk), "lock", num(lock));
+                "stalk", num(event.getStalkSeconds()), "lock", num(event.getLockSeconds()),
+                "count", String.valueOf(event.getList().size()));
     }
 
     /** /worm breach [player|self|here]: straight to BREACH under a player, or the effect alone at the caller. */
@@ -252,7 +376,7 @@ public class WormCommand extends AbstractCommandCollection {
             say(context, "breach.here");
             return;
         }
-        trigger(context, world, store, new String[] {who, "0.05", "0.05"});
+        trigger(context, store, new String[] {who, "0.05", "0.05"}, true);
     }
 
     /** /worm sink [wait] [depth] [delay]: the pull under the sand, on you alone, to watch. */

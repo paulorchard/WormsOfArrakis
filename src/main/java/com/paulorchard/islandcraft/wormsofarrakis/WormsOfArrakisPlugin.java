@@ -67,6 +67,9 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
         writeConfig();
         getEntityStoreRegistry().registerSystem(testSystem);
         getEntityStoreRegistry().registerSystem(new WormBrainSystem(aggro, effects));
+        // Totems: the deployables whose id is registered. Other mods add theirs with WormAggro.registerTotem.
+        aggro.totemRegistry().addAll(Arrays.asList(config.get().getTotemDeployableIds()));
+        getEntityStoreRegistry().registerSystem(aggro.totems());
         // The sand disturbance: what players place on Arrakis_Sand, and the clock that takes it back.
         getEntityStoreRegistry().registerSystem(disturbances);
         getEntityStoreRegistry().registerSystem(disturbances.tracker().placeSystem());
@@ -75,6 +78,9 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
         getCommandRegistry().registerCommand(new WormTestCommand(testSystem, this::sandBlockIds));
         wormCommand = new WormCommand(aggro, config::get, effects, testSystem, disturbances);
         getCommandRegistry().registerCommand(wormCommand);
+        // The aggro rules go first, so a list is already freed (and its scores zeroed) when the other hooks run.
+        WormEvents.get().addListener(aggro.core());
+        effects.setCore(aggro.core());
         WormEvents.get().addListener(new WormEventLog(aggro, config::get, () -> wormCommand.getPermission()));
         WormEvents.get().addListener(effects);
         // Someone who leaves the world while pulled under the sand is saved where they stood on the surface.
@@ -88,7 +94,8 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
         getEventRegistry().registerGlobal(PlayerDisconnectEvent.class, event -> {
             // A client that is gone needs no restoring, but a test job must not keep running for it.
             testSystem.dropFor(event.getPlayerRef().getUuid());
-            aggro.forget(event.getPlayerRef().getUuid());
+            // In an event's list: out of it, with 99 kept for the return. Otherwise the score is lost.
+            aggro.logOff(event.getPlayerRef().getUuid());
             effects.forget(event.getPlayerRef().getUuid());
         });
     }
@@ -109,6 +116,13 @@ public class WormsOfArrakisPlugin extends JavaPlugin {
                 c.getDisturbanceMaxEditsPerTick(), c.getDisturbanceViewDistance(), c.getDisturbanceDustScale(),
                 c.getDisturbanceMaxBursts(), c.isDisturbanceCreativeTriggers(), c.isDisturbanceLagFallback(),
                 c.getDisturbanceLagMillis(), c.getDisturbanceMaxCost(), c.getDisturbanceFallbackSeconds()));
+        getLogger().at(Level.INFO).log("%s", String.format(java.util.Locale.ROOT,
+                "Aggro multiplier settings (new keys): AggroEffectMultipliers=%s AggroMultiplierMax=%s",
+                new java.util.TreeMap<>(c.getAggroEffectMultipliers()), c.getAggroMultiplierMax()));
+        java.util.List<String> missingEffects = aggro.effects().missing();
+        if (!missingEffects.isEmpty()) {
+            getLogger().at(Level.INFO).log("Aggro multiplier effects that do not exist in this game (skipped): %s", missingEffects);
+        }
         getLogger().at(Level.INFO).log("Sand disturbance: %s", arrakisSandId() == NOT_INSTALLED
                 ? "Dunes of Arrakis is not installed, so nothing is tracked and nothing happens"
                 : "Arrakis_Sand is block id " + arrakisSandId());

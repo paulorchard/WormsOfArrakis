@@ -10,8 +10,8 @@ import java.util.function.Consumer;
 import java.util.logging.Level;
 
 /**
- * The live worm events and the hooks. Later prompts read events from here and register a
- * {@link WormEventListener}. Ticked by the brain once per world tick.
+ * The live worm events and the hooks. Register a {@link WormEventListener} to see them. Ticked by the brain once per
+ * world tick. Several events can run at once; a being is in at most one.
  */
 public final class WormEvents {
 
@@ -38,8 +38,13 @@ public final class WormEvents {
         }
 
         @Override
-        public void onRetarget(WormEvent event, UUID oldTarget, UUID newTarget) {
-            each(l -> l.onRetarget(event, oldTarget, newTarget));
+        public void onMemberAdded(WormEvent event, UUID being) {
+            each(l -> l.onMemberAdded(event, being));
+        }
+
+        @Override
+        public void onMemberRemoved(WormEvent event, UUID being, WormEvent.Leave why) {
+            each(l -> l.onMemberRemoved(event, being, why));
         }
 
         @Override
@@ -48,7 +53,8 @@ public final class WormEvents {
         }
     };
 
-    private WormEvents() {
+    /** The one the plugin uses; tests make their own. */
+    WormEvents() {
     }
 
     private void each(Consumer<WormEventListener> call) {
@@ -56,12 +62,15 @@ public final class WormEvents {
             try {
                 call.accept(listener);
             } catch (Throwable t) {
-                WormsOfArrakisPlugin.get().getLogger().at(Level.WARNING).withCause(t).log("A worm event listener failed");
+                WormsOfArrakisPlugin plugin = WormsOfArrakisPlugin.get();
+                if (plugin != null) {
+                    plugin.getLogger().at(Level.WARNING).withCause(t).log("A worm event listener failed");
+                }
             }
         }
     }
 
-    /** Registers a hook. The built-in logger and score handling are registered first. */
+    /** Registers a hook. The aggro manager and the built-in logger are registered first. */
     public void addListener(WormEventListener listener) {
         listeners.add(listener);
     }
@@ -70,25 +79,25 @@ public final class WormEvents {
         listeners.remove(listener);
     }
 
-    /** Every event not yet ENDED, including groups in COOLDOWN. */
+    /** Every event not yet ENDED. */
     public List<WormEvent> all() {
         return new ArrayList<>(events);
     }
 
-    /** The event, in any phase but ENDED, that this player is a member of; null if none. */
-    public WormEvent eventOf(UUID player) {
+    /** The event this being is in the list of; null if none. */
+    public WormEvent eventOf(UUID being) {
         for (WormEvent e : events) {
-            if (e.isLive() && e.hasMember(player)) {
+            if (e.isLive() && e.hasMember(being)) {
                 return e;
             }
         }
         return null;
     }
 
-    /** Creates an event. If {@code target} is null it ends FIZZLED at once. */
-    WormEvent start(String world, List<UUID> ranking, UUID target, Vector3d wormStart, WormEvent.Timings timings,
-                    boolean forced) {
-        WormEvent event = new WormEvent(nextId++, world, ranking, target, wormStart, timings, forced, dispatcher);
+    /** Creates an event and enters STALKING. {@code guaranteedTarget} is set for an entity trigger. */
+    WormEvent start(String world, UUID trigger, List<UUID> list, UUID guaranteedTarget, Vector3d origin,
+                    WormEvent.Timings timings, boolean forced) {
+        WormEvent event = new WormEvent(nextId++, world, trigger, list, guaranteedTarget, origin, timings, forced, dispatcher);
         if (event.isLive()) {
             events.add(event);
         }
@@ -107,11 +116,11 @@ public final class WormEvents {
         }
     }
 
-    /** Ends the player's event (STOPPED), or all events if null. Returns how many were ended. */
-    int stop(UUID player) {
+    /** Ends the being's event (STOPPED), or all events if null. Returns how many were ended. */
+    int stop(UUID being) {
         int n = 0;
         for (WormEvent e : events) {
-            if (player == null || e.hasMember(player)) {
+            if (being == null || e.hasMember(being)) {
                 e.stop();
                 events.remove(e);
                 n++;
